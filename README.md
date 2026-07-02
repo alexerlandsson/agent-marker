@@ -11,11 +11,15 @@ the batch to an AI coding agent (Claude Code) as a ready-to-paste prompt.
 
 ## Use
 
-1. Click the toolbar icon → the sidebar appears.
-2. Click **Mark up** to start marking (click again to stop).
-3. Hover the page: elements highlight. Click one → type what should change → **OK**.
-4. Edit or delete any mark from the sidebar list. Marks persist across pages/URLs.
-5. **Send to agent** → copy the generated prompt → paste into Claude Code.
+1. Click the toolbar icon → the docked panel appears (top-right).
+2. Click **Mark** (or press `M`) to start marking; click/press again to stop.
+3. Hover the page: elements highlight with a tag label. Click one → type what
+   should change → **Save** (`⌘↵`) or **Cancel** (`Esc`).
+4. Edit or delete any mark from the panel list. Marks persist across pages/URLs.
+5. **Send to agent** (or press `S`) → copy the generated prompt → paste into Claude Code.
+
+Use the **minimize** button (▁) to collapse the panel into a draggable floating
+mini-bar; **⤢** expands it back. See `DESIGN.md` for the design system.
 
 The prompt includes, per mark: page title + URL, a CSS selector, the element
 (tag/id/classes + text snippet), and your instruction — enough for Claude Code

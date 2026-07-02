@@ -21,7 +21,7 @@ color:
   divider:       "#26282b"   # footer top rule
   # text
   text:          "#e7e9ec"   # primary
-  textMuted:     "#9ba1a8"   # secondary
+  textMuted:     "#8b929b"   # secondary (AA on dark surfaces)
   textDim:       "#6c7178"   # labels, counts
   textFaint:     "#5b6068"   # Edit · Delete
   # accent (teal)
@@ -31,8 +31,8 @@ color:
   tagBorder:     "#1c4c43"   # element tag chip border
 
 font:
-  ui:   "system-ui, -apple-system, 'Segoe UI', sans-serif"
-  mono: "'JetBrains Mono', ui-monospace, monospace"   # labels, tags, kbd, counts
+  ui:   "'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif"
+  mono: "'Geist Mono', ui-monospace, monospace"   # labels, tags, kbd, counts, prompt textarea
 
 radius:
   panel: 14px

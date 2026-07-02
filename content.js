@@ -24,6 +24,13 @@
   let editingId = null;
   let marks = [];
 
+  // Load Geist / Geist Mono. Fonts are document-scoped so they reach the shadow
+  // root. Falls back to system fonts if the page CSP blocks Google Fonts.
+  const fontLink = document.createElement("link");
+  fontLink.rel = "stylesheet";
+  fontLink.href = "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap";
+  (document.head || document.documentElement).appendChild(fontLink);
+
   // --- shadow-root UI host -------------------------------------------------
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
@@ -33,10 +40,10 @@
       :host {
         --bg:#0c0d0f; --panel:#161719; --card:#1e2023; --composer:#1a1b1e; --neutral:#26282b;
         --border:#303236; --border-card:#2c2f33; --border-subtle:#34363a; --divider:#26282b;
-        --text:#e7e9ec; --muted:#9ba1a8; --dim:#6c7178; --faint:#5b6068;
+        --text:#e7e9ec; --muted:#8b929b; --dim:#6c7178; --faint:#5b6068;
         --accent:#5fe3c8; --accent-ink:#062b24; --tag-bg:#0f2a25; --tag-border:#1c4c43;
-        --mono:'JetBrains Mono',ui-monospace,monospace;
-        font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+        --mono:'Geist Mono',ui-monospace,monospace;
+        font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;
       }
       * { box-sizing:border-box; }
       button { font-family:inherit; cursor:pointer; }
@@ -49,7 +56,7 @@
         background:#1a1b1e; color:var(--accent); padding:3px 8px; border-radius:5px; display:none; white-space:nowrap; }
 
       /* docked panel */
-      .panel { position:fixed; top:16px; right:16px; bottom:16px; width:360px; background:var(--panel);
+      .panel { position:fixed; top:0.25rem; right:0.25rem; bottom:0.25rem; width:360px; background:var(--panel);
         border:1px solid var(--border); border-radius:14px; display:none; flex-direction:column; overflow:hidden;
         box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
       .header { display:flex; align-items:center; gap:11px; padding:16px; }
@@ -58,7 +65,7 @@
       .logo b { font-weight:700; font-size:12px; color:#f2f3f5; line-height:1; }
       .logo i { width:13px; height:2.5px; background:var(--accent); border-radius:2px; margin-top:1.5px; }
       .title { font-size:13px; font-weight:600; line-height:1; }
-      .count { font-size:11px; color:var(--dim); margin-top:3px; }
+      .count { font-size:11px; color:var(--muted); margin-top:3px; }
       .htools { margin-left:auto; display:flex; align-items:center; gap:8px; }
       .iconbtn { width:32px; height:32px; border:1px solid var(--border-card); border-radius:8px; background:transparent;
         display:flex; align-items:center; justify-content:center; padding:0; color:var(--muted); }
@@ -74,13 +81,13 @@
       .markhead { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
       .tag { font-family:var(--mono); font-size:10.5px; color:var(--accent); background:var(--tag-bg);
         border:1px solid var(--tag-border); border-radius:5px; padding:2px 7px; font-weight:600; }
-      .ref { font-family:var(--mono); font-size:11px; color:#7d848c; }
-      .actions { margin-left:auto; font-size:11px; color:var(--faint); display:flex; gap:6px; }
+      .ref { font-family:var(--mono); font-size:11px; color:var(--muted); }
+      .actions { margin-left:auto; font-size:11px; color:var(--muted); display:flex; gap:6px; }
       .actions span { cursor:pointer; }
-      .actions span:hover { color:var(--muted); }
+      .actions span:hover { color:var(--text); }
       .msg { font-size:13px; line-height:1.45; color:var(--text); white-space:pre-wrap; word-break:break-word; }
       .editrow { display:flex; gap:7px; margin-top:9px; }
-      .empty { color:var(--dim); font-size:12.5px; text-align:center; padding:24px 8px; }
+      .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; }
 
       textarea { width:100%; background:#111214; color:var(--text); border:1px solid var(--border-subtle);
         border-radius:8px; padding:8px; font:13px/1.4 inherit; resize:vertical; }
@@ -114,9 +121,9 @@
       .barmark.active { background:var(--accent); color:var(--accent-ink); }
       .barsend { display:flex; align-items:center; gap:6px; height:32px; padding:0 10px; border:none; border-radius:8px;
         background:transparent; color:#cfd3d8; font-size:12.5px; font-weight:600; }
-      .expand { margin-left:auto; width:30px; height:30px; border:none; border-radius:8px; background:var(--neutral);
+      .expand { margin-left:auto; width:30px; height:30px; border:1px solid var(--border-card); border-radius:8px; background:transparent;
         color:var(--muted); display:flex; align-items:center; justify-content:center; }
-      .expand:hover { color:var(--text); }
+      .expand:hover { color:var(--text); border-color:var(--border-subtle); }
 
       /* composer */
       .popup { position:fixed; pointer-events:auto; width:280px; background:var(--composer); border:1px solid var(--border-subtle);
@@ -134,7 +141,7 @@
       .dialog { position:fixed; pointer-events:auto; top:50%; left:50%; transform:translate(-50%,-50%); width:min(700px,90vw);
         max-height:85vh; padding:16px; background:var(--panel); border:1px solid var(--border); border-radius:14px;
         display:none; flex-direction:column; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
-      .dialog textarea { flex:1; min-height:160px; margin:12px 0; overflow:auto; resize:none; }
+      .dialog textarea { flex:1; min-height:160px; margin:12px 0; overflow:auto; resize:none; font-family:var(--mono); }
       .dialoghead { display:flex; justify-content:space-between; align-items:center; }
 
       /* confirm overlay */
@@ -418,10 +425,11 @@
 
   // --- mini-bar drag ------------------------------------------------------
   function positionBar() {
-    if (!barPos) { bar.style.left = "20px"; bar.style.top = (window.innerHeight - 68) + "px"; return; }
+    const off = parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.25; // 0.25rem
+    if (!barPos) { bar.style.left = off + "px"; bar.style.top = (window.innerHeight - 48 - off) + "px"; return; }
     const w = bar.offsetWidth || 360, h = 48;
-    bar.style.left = Math.max(4, Math.min(barPos.x, window.innerWidth - w - 4)) + "px";
-    bar.style.top = Math.max(4, Math.min(barPos.y, window.innerHeight - h - 4)) + "px";
+    bar.style.left = Math.max(off, Math.min(barPos.x, window.innerWidth - w - off)) + "px";
+    bar.style.top = Math.max(off, Math.min(barPos.y, window.innerHeight - h - off)) + "px";
   }
   $("grip").addEventListener("mousedown", (e) => {
     e.preventDefault();

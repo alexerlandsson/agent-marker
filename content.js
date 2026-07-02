@@ -12,9 +12,16 @@
     "minimize-2": '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/>',
     "maximize-2": '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
     "grip-vertical": '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
+    github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
     copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   };
   const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+
+  // Brand logo (see logo.svg).
+  const logoSvg = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 128 128" fill="none" aria-hidden="true">` +
+    `<rect width="128" height="128" rx="30" fill="#191A1C"/>` +
+    `<text x="64" y="82" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="82" letter-spacing="-2" fill="#F2F3F5">A</text>` +
+    `<rect x="33" y="92" width="62" height="10" rx="5" fill="#5FE3C8" transform="rotate(-3 64 97)"/></svg>`;
 
   let open = false;       // panel/bar visible (toolbar icon)
   let marking = false;    // marker mode (Mark / key M)
@@ -60,11 +67,11 @@
         border:1px solid var(--border); border-radius:14px; display:none; flex-direction:column; overflow:hidden;
         box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
       .header { display:flex; align-items:center; gap:11px; padding:16px; }
-      .logo { width:26px; height:26px; border-radius:7px; background:#191a1c; border:1px solid #2f3a44;
-        display:flex; flex-direction:column; align-items:center; justify-content:center; flex:none; }
-      .logo b { font-weight:700; font-size:12px; color:#f2f3f5; line-height:1; }
-      .logo i { width:13px; height:2.5px; background:var(--accent); border-radius:2px; margin-top:1.5px; }
-      .title { font-size:13px; font-weight:600; line-height:1; }
+      .logo { display:flex; flex:none; }
+      .logo svg { display:block; }
+      .title { font-size:13px; font-weight:600; line-height:1; display:flex; align-items:center; gap:6px; }
+      .ghlink { display:inline-flex; color:var(--muted); }
+      .ghlink:hover { color:var(--text); }
       .count { font-size:11px; color:var(--muted); margin-top:3px; }
       .htools { margin-left:auto; display:flex; align-items:center; gap:8px; }
       .iconbtn { width:32px; height:32px; border:1px solid var(--border-card); border-radius:8px; background:transparent;
@@ -112,8 +119,6 @@
       .bar { position:fixed; height:48px; background:var(--panel); border:1px solid var(--border-card); border-radius:13px;
         display:none; align-items:center; gap:10px; padding:0 8px 0 10px; box-shadow:0 14px 34px -8px rgba(0,0,0,.5); color:var(--text); }
       .grip { display:flex; align-items:center; padding:0 1px; cursor:grab; color:#5a5e64; }
-      .barlogo { width:22px; height:22px; }
-      .barlogo b { font-size:10px; } .barlogo i { width:11px; height:2px; margin-top:1.5px; }
       .barcount { font-family:var(--mono); font-size:11px; color:var(--muted); }
       .vr { width:1px; height:22px; background:var(--border-card); margin:0 2px; }
       .barmark { display:flex; align-items:center; gap:6px; height:32px; padding:0 10px; border:1px solid var(--accent);
@@ -156,9 +161,9 @@
 
     <div class="panel">
       <div class="header">
-        <div class="logo"><b>A</b><i></i></div>
+        <div class="logo">${logoSvg(26)}</div>
         <div>
-          <div class="title">Agent Marker</div>
+          <div class="title">Agent Marker<a class="ghlink pe" href="https://github.com/alexerlandsson/agent-marker" target="_blank" rel="noopener noreferrer" title="View on GitHub" aria-label="View on GitHub">${icon("github", 13)}</a></div>
           <div class="count" id="count"></div>
         </div>
         <div class="htools">
@@ -175,7 +180,7 @@
 
     <div class="bar">
       <div class="grip pe" id="grip" title="Drag">${icon("grip-vertical", 18)}</div>
-      <div class="logo barlogo"><b>A</b><i></i></div>
+      <div class="logo barlogo">${logoSvg(22)}</div>
       <span class="barcount" id="barcount">0</span>
       <span class="vr"></span>
       <button class="barmark onaccent pe" id="barmark">Mark <kbd>M</kbd></button>

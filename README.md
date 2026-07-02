@@ -5,8 +5,8 @@
 <h1 align="center">Agent Marker</h1>
 
 <p align="center">
-  Mark elements on any web page, note what should change, and hand the whole batch
-  to your AI coding agent as a ready-to-paste prompt.
+  <strong>Mark elements on any web page, note what should change, and hand the whole batch
+  to your AI coding agent as a ready-to-paste prompt.</strong>
 </p>
 
 ---
@@ -20,7 +20,7 @@ every mark. Mark across multiple pages in one go; send once.
 ## Install
 
 1. Open `chrome://extensions` and enable **Developer mode** (top-right).
-2. Click **Load unpacked** and select this folder.
+2. Click `Load unpacked` and select this folder.
 3. Pin the extension, then click its toolbar icon to open the panel.
 
 ## Usage
@@ -35,9 +35,6 @@ every mark. Mark across multiple pages in one go; send once.
 
 Edit or delete any mark from the list. **Minimize** collapses the panel into a
 draggable floating mini-bar; **⤢** expands it back.
-
-> Marks are session-scoped — closing the plugin clears them, so nothing leaks
-> between sites or sessions.
 
 ### Keyboard shortcuts
 
@@ -54,8 +51,3 @@ Each mark contributes its page title and URL, a CSS selector, the element
 (tag / id / classes + a text snippet), and your instruction — grouped by page.
 That's enough for Claude Code to locate the code and make the change without any
 extra context from you.
-
-## Design
-
-The panel's visual language (dark teal theme, tokens, components) is documented
-in [`DESIGN.md`](./DESIGN.md).

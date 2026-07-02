@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Marker",
+  "version": "0.1.0",
+  "description": "Mark elements on a page, write what should change, and send the batch to an AI coding agent.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Toggle Agent Marker" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

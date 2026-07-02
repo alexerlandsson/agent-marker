@@ -25,5 +25,11 @@
       "js": ["content.js"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["fonts/geist.woff2", "fonts/geist-mono.woff2"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

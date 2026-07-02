@@ -31,12 +31,18 @@
   let editingId = null;
   let marks = [];
 
-  // Load Geist / Geist Mono. Fonts are document-scoped so they reach the shadow
-  // root. Falls back to system fonts if the page CSP blocks Google Fonts.
-  const fontLink = document.createElement("link");
-  fontLink.rel = "stylesheet";
-  fontLink.href = "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap";
-  (document.head || document.documentElement).appendChild(fontLink);
+  // Load Geist / Geist Mono from bundled files. They're web_accessible_resources
+  // loaded from a chrome-extension:// URL, which is exempt from the page CSP
+  // (a Google Fonts <link> gets blocked by strict font-src, e.g. on GitHub).
+  // @font-face is registered on the main document so it reaches the shadow root.
+  const fontStyle = document.createElement("style");
+  fontStyle.textContent = `
+    @font-face { font-family:'Geist'; font-weight:100 900; font-display:swap;
+      src:url('${chrome.runtime.getURL("fonts/geist.woff2")}') format('woff2'); }
+    @font-face { font-family:'Geist Mono'; font-weight:100 900; font-display:swap;
+      src:url('${chrome.runtime.getURL("fonts/geist-mono.woff2")}') format('woff2'); }
+  `;
+  (document.head || document.documentElement).appendChild(fontStyle);
 
   // --- shadow-root UI host -------------------------------------------------
   const host = document.createElement("div");

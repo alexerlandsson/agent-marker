@@ -1,34 +1,61 @@
-# Agent Marker
+<p align="center">
+  <img src="logo.svg" width="96" height="96" alt="Agent Marker logo">
+</p>
 
-Chrome extension to mark elements on a page, write what should change, and send
-the batch to an AI coding agent (Claude Code) as a ready-to-paste prompt.
+<h1 align="center">Agent Marker</h1>
 
-## Install (dev)
+<p align="center">
+  Mark elements on any web page, note what should change, and hand the whole batch
+  to your AI coding agent as a ready-to-paste prompt.
+</p>
 
-1. Go to `chrome://extensions`, enable **Developer mode**.
-2. **Load unpacked** → select this folder.
-3. Pin the extension. Click its toolbar icon to toggle marker mode.
+---
 
-## Use
+Stop typing "the button in the header on the pricing page" over and over. Agent
+Marker lets you **click the elements you want changed**, jot a one-line
+instruction for each, and generate a single prompt that tells Claude Code
+exactly what to change and where — complete with page URL and a CSS selector for
+every mark. Mark across multiple pages in one go; send once.
 
-1. Click the toolbar icon → the docked panel appears (top-right).
-2. Click **Mark** (or press `M`) to start marking; click/press again to stop.
-3. Hover the page: elements highlight with a tag label. Click one → type what
-   should change → **Save** (`⌘↵`) or **Cancel** (`Esc`).
-4. Edit or delete any mark from the panel list. Marks persist across pages/URLs.
-5. **Send to agent** (or press `S`) → copy the generated prompt → paste into Claude Code.
+## Install
 
-Use the **minimize** button (▁) to collapse the panel into a draggable floating
-mini-bar; **⤢** expands it back. See `DESIGN.md` for the design system.
+1. Open `chrome://extensions` and enable **Developer mode** (top-right).
+2. Click **Load unpacked** and select this folder.
+3. Pin the extension, then click its toolbar icon to open the panel.
 
-The prompt includes, per mark: page title + URL, a CSS selector, the element
-(tag/id/classes + text snippet), and your instruction — enough for Claude Code
-to locate the code and make the change.
+## Usage
 
-## Later: MCP instead of copy-paste
+1. **Open** — click the toolbar icon. A docked panel appears at the top-right.
+2. **Mark** — click **Mark** (or press <kbd>M</kbd>) to arm marking. Hover the
+   page to highlight elements; click one to open a note.
+3. **Describe** — type what should change (e.g. _"make this heading bigger"_) and
+   **Save**. It's added to the panel list. Repeat across as many pages as you like.
+4. **Send** — click **Send to agent** (or press <kbd>S</kbd>), **Copy prompt**,
+   and paste it into Claude Code.
 
-Copy-paste needs zero infra and already kills the "type the reference" chore.
-Add an MCP server only if you want Claude Code to pull marks without pasting.
-Sketch: run a tiny local HTTP + MCP server; have the extension POST marks to
-`localhost` instead of (or alongside) storage; expose a `get_marks` MCP tool.
-Not built yet — the copy-paste flow covers the goal first.
+Edit or delete any mark from the list. **Minimize** collapses the panel into a
+draggable floating mini-bar; **⤢** expands it back.
+
+> Marks are session-scoped — closing the plugin clears them, so nothing leaks
+> between sites or sessions.
+
+### Keyboard shortcuts
+
+| Key            | Action                    |
+| -------------- | ------------------------- |
+| <kbd>M</kbd>   | Toggle marking            |
+| <kbd>S</kbd>   | Send to agent             |
+| <kbd>⌘</kbd> <kbd>↵</kbd> | Save the current note |
+| <kbd>Esc</kbd> | Cancel / close            |
+
+## What the agent receives
+
+Each mark contributes its page title and URL, a CSS selector, the element
+(tag / id / classes + a text snippet), and your instruction — grouped by page.
+That's enough for Claude Code to locate the code and make the change without any
+extra context from you.
+
+## Design
+
+The panel's visual language (dark teal theme, tokens, components) is documented
+in [`DESIGN.md`](./DESIGN.md).

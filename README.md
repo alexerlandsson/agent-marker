@@ -25,25 +25,35 @@ every mark. Mark across multiple pages in one go; send once.
 
 ## Usage
 
-1. **Open** — click the toolbar icon. A docked panel appears at the top-right.
-2. **Mark** — click **Mark** (or press <kbd>M</kbd>) to arm marking. Hover the
-   page to highlight elements; click one to open a note.
-3. **Describe** — type what should change (e.g. _"make this heading bigger"_) and
-   **Save**. It's added to the panel list. Repeat across as many pages as you like.
-4. **Send** — click **Send to agent** (or press <kbd>S</kbd>), **Copy prompt**,
+1. **Open** — click the toolbar icon. A small floating pill appears in the
+   bottom-right corner with marking already armed. Drag the pill anywhere;
+   drop it near a corner and it snaps there (and stays there across resizes).
+2. **Mark** — hover the page to highlight elements (<kbd>↑</kbd>/<kbd>↓</kbd>
+   walk to the parent/child), then click (or press <kbd>↵</kbd>) to open a note.
+3. **Describe** — type what should change (e.g. _"make this heading bigger"_)
+   and **Save**. A numbered dot pins to the element, and the pill count ticks
+   up. Repeat across as many pages as you like — marks follow the tab.
+4. **Review** — click the count on the pill (or press <kbd>L</kbd>) to open the
+   marks panel. Hover a card to highlight its element, click its number to
+   scroll to it, edit or delete inline.
+5. **Generate** — press <kbd>S</kbd> (or the terminal button), **Copy prompt**,
    and paste it into Claude Code.
 
-Edit or delete any mark from the list. **Minimize** collapses the panel into a
-draggable floating mini-bar; **⤢** expands it back.
+Marks are **per tab** and last until the tab (or browser) closes — the toolbar
+icon just hides the tool without losing anything, and its badge shows each
+tab's mark count.
 
 ### Keyboard shortcuts
 
-| Key            | Action                    |
-| -------------- | ------------------------- |
-| <kbd>M</kbd>   | Toggle marking            |
-| <kbd>S</kbd>   | Send to agent             |
-| <kbd>⌘</kbd> <kbd>↵</kbd> | Save the current note |
-| <kbd>Esc</kbd> | Cancel / close            |
+| Key            | Action                                        |
+| -------------- | --------------------------------------------- |
+| <kbd>M</kbd>   | Toggle marking                                 |
+| <kbd>L</kbd>   | Toggle the marks panel                         |
+| <kbd>S</kbd>   | Generate prompt                                |
+| <kbd>↑</kbd> <kbd>↓</kbd> | While marking: walk to parent / back to child |
+| <kbd>↵</kbd>   | While marking: mark the highlighted element    |
+| <kbd>⌘</kbd> <kbd>↵</kbd> | Save the current note              |
+| <kbd>Esc</kbd> | Close the topmost thing (note → dialog → marking → panel) |
 
 ## What the agent receives
 

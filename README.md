@@ -11,6 +11,10 @@
 
 ---
 
+<p align="center">
+  <img src="screenshot.png" alt="Agent Marker in action: the floating pill, numbered marks on page elements, and the marks panel with notes" width="720">
+</p>
+
 Stop typing "the button in the header on the pricing page" over and over. Agent
 Marker lets you **click the elements you want changed**, jot a one-line
 instruction for each, and generate a single prompt that tells Claude Code
@@ -26,8 +30,9 @@ every mark. Mark across multiple pages in one go; send once.
 ## Usage
 
 1. **Open** — click the toolbar icon. A small floating pill appears in the
-   bottom-right corner with marking already armed. Drag the pill anywhere;
-   drop it near a corner and it snaps there (and stays there across resizes).
+   bottom-right corner with marking armed (reopening a tab that already has
+   marks shows the marks panel instead). Drag the pill anywhere; drop it near
+   a corner and it snaps there (and stays there across resizes).
 2. **Mark** — hover the page to highlight elements (<kbd>↑</kbd>/<kbd>↓</kbd>
    walk to the parent/child), then click (or press <kbd>↵</kbd>) to open a note.
 3. **Describe** — type what should change (e.g. _"make this heading bigger"_)
@@ -52,6 +57,7 @@ tab's mark count.
 | <kbd>S</kbd>   | Generate prompt                                |
 | <kbd>↑</kbd> <kbd>↓</kbd> | While marking: walk to parent / back to child |
 | <kbd>↵</kbd>   | While marking: mark the highlighted element    |
+| <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>⌥</kbd> <kbd>↓</kbd> | In the note composer: retarget to parent / back |
 | <kbd>⌘</kbd> <kbd>↵</kbd> | Save the current note              |
 | <kbd>Esc</kbd> | Close the topmost thing (note → dialog → marking → panel) |
 

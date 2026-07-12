@@ -3,3 +3,6 @@
 # Claude Code
 .claude/settings.local.json
 .CLAUDE.local.md
+
+# Browser-automation tooling logs
+.playwright-mcp/

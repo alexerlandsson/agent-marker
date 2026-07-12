@@ -54,10 +54,11 @@ across pages.
   the face reaches into the shadow DOM) using `chrome.runtime.getURL`. This
   exists to bypass strict page CSPs — keep it. Both are declared in
   `web_accessible_resources`.
-- **`DESIGN.md` is the design-token source of truth.** Colors, radii, shadows,
-  and sizes there map 1:1 to the CSS custom properties in `content.js`. Change
-  tokens in both, and keep the keyboard-shortcut tables in `DESIGN.md` and
-  `README.md` in sync with the `keydown` handlers in `content.js`.
+- **`DESIGN.md` is the design-token source of truth.** Colors and the mono
+  font map 1:1 to CSS custom properties on `:host` in `content.js`; radii,
+  shadows, and sizes are literals there — change both places together, and
+  keep the keyboard-shortcut tables in `DESIGN.md` and `README.md` in sync
+  with the `keydown` handlers in `content.js`.
 - Global shortcuts (`M`, `S`, `L`) are suppressed while typing — gate on
   `isTyping()`. `Escape` closes strictly top-down: confirm → composer → prompt
   dialog → card editor → marking mode → panel.
@@ -66,6 +67,8 @@ across pages.
   source code.
 - The user-facing action is **"Generate prompt"** (terminal icon) — nothing is
   sent anywhere; the dialog just offers the prompt for copying.
-- To manually test without loading the extension, there's a harness pattern:
-  a plain HTML page that stubs `chrome.runtime`/`chrome.storage.session` and
-  loads `content.js` — see git history or ask for it to be regenerated.
+- To manually test without loading the extension, open `harness.html` (repo
+  root) via `file://` — it stubs `chrome.runtime`/`chrome.storage.session`,
+  loads `./content.js`, and exposes `toggleExt()` / `extState()` on `window`
+  for driving state from the console. It is dev-only and not part of the
+  shipped extension.

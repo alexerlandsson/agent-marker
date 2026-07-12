@@ -15,15 +15,18 @@
     "grip-vertical": '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
     copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    "chevron-up": '<path d="m18 15-6-6-6 6"/>',
+    "chevron-down": '<path d="m6 9 6 6 6-6"/>',
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
     "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
   };
   const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 
-  // Brand logo (see logo.svg).
-  const logoSvg = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 128 128" fill="none" aria-hidden="true">` +
-    `<rect width="128" height="128" rx="30" fill="#191A1C"/>` +
+  // Brand logo (see logo.svg). Panel: chip on card tokens (stroke-width 6 ≈ 1px
+  // at 20-24px) so it sits like a mark card. Pill: bare glyph, no backdrop.
+  const logoSvg = (s, bare) => `<svg width="${s}" height="${s}" viewBox="0 0 128 128" fill="none" aria-hidden="true">` +
+    (bare ? "" : `<rect x="3" y="3" width="122" height="122" rx="27" fill="var(--card)" stroke="var(--border-card)" stroke-width="6"/>`) +
     `<text x="64" y="82" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="82" letter-spacing="-2" fill="#F2F3F5">A</text>` +
     `<rect x="33" y="92" width="62" height="10" rx="5" fill="#5FE3C8" transform="rotate(-3 64 97)"/></svg>`;
 
@@ -33,12 +36,15 @@
   let tabKey = null;      // "tab:<id>", learned from background.js
   let state = null;       // { open, marking, listOpen, pos, marks } — mirrors storage
   let editingId = null;   // mark id being edited in the list
+  let editDraft = null;   // in-progress edit text — survives re-renders (resize, storage echo)
   let popupOpen = false;  // note composer visible
   let popupEl = null;     // element the composer is for
+  let popupChain = [];    // children walked up from via ⌥↑, for ⌥↓
   let hoverEl = null;     // element under the cursor while marking
   let lockChain = [];     // ancestors walked to with ArrowUp
   let cardHover = false;  // a list card is previewing its element
   let lastFocus = null;   // focus to restore when dialog/confirm closes
+  let lastCount = -1;     // previous mark count, for the count-pulse animation
 
   // Load Geist / Geist Mono from bundled files. They're web_accessible_resources
   // loaded from a chrome-extension:// URL, which is exempt from the page CSP
@@ -60,11 +66,12 @@
   root.innerHTML = `
     <style>
       :host {
-        --bg:#0c0d0f; --panel:#161719; --card:#1e2023; --composer:#1a1b1e; --neutral:#26282b;
+        --panel:#161719; --card:#1e2023; --composer:#1a1b1e; --neutral:#26282b;
         --border:#303236; --border-card:#2c2f33; --border-subtle:#34363a; --divider:#26282b;
-        --text:#e7e9ec; --muted:#8b929b; --dim:#6c7178; --faint:#5b6068;
+        --text:#e7e9ec; --muted:#8b929b;
         --accent:#5fe3c8; --accent-ink:#062b24; --tag-bg:#0f2a25; --tag-border:#1c4c43;
         --mono:'Geist Mono',ui-monospace,monospace;
+        --ease-out:cubic-bezier(.165,.84,.44,1);
         font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;
       }
       * { box-sizing:border-box; }
@@ -76,7 +83,7 @@
       .highlight { position:fixed; z-index:0; pointer-events:none; border:2px solid var(--accent); border-radius:4px;
         box-shadow:0 0 0 4px rgba(95,227,200,.18); display:none; }
       .tagLabel { position:fixed; z-index:1; pointer-events:none; font-family:var(--mono); font-size:11px;
-        background:#1a1b1e; color:var(--accent); padding:3px 8px; border-radius:5px; display:none; white-space:nowrap; }
+        background:var(--composer); color:var(--accent); padding:3px 8px; border-radius:5px; display:none; white-space:nowrap; }
 
       /* numbered chips on marked elements */
       .dots { position:fixed; inset:0; z-index:2; pointer-events:none; }
@@ -89,13 +96,17 @@
         background:var(--panel); border:1px solid var(--border-card); border-radius:12px; color:var(--text);
         box-shadow:0 14px 34px -8px rgba(0,0,0,.5); cursor:grab; touch-action:none; user-select:none; }
       .pill.dragging { cursor:grabbing; }
-      .pill.snap { transition:left .22s cubic-bezier(.2,.8,.2,1), top .22s cubic-bezier(.2,.8,.2,1); }
       .grip { display:flex; color:#5a5e64; }
       .logo { display:flex; flex:none; }
       .logo svg { display:block; }
-      .markbtn { display:flex; align-items:center; gap:6px; height:30px; padding:0 8px 0 10px; border:1px solid var(--accent);
-        border-radius:8px; background:transparent; color:var(--accent); font-size:12px; font-weight:600; }
-      .markbtn.active { background:var(--accent); color:var(--accent-ink); }
+      /* Mark is a mode toggle: active = accent tint, never a fill — fills are
+         reserved for the one action that commits the current step. */
+      .markbtn { display:flex; align-items:center; gap:6px; height:30px; padding:0 8px 0 10px; border:1px solid var(--border-card);
+        border-radius:8px; background:transparent; color:var(--muted); font-size:12px; font-weight:600; }
+      .markbtn:hover { color:var(--text); border-color:var(--border-subtle); }
+      .markbtn.active { background:var(--tag-bg); border-color:var(--accent); color:var(--accent); }
+      .markbtn kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
+      .markbtn.active kbd { background:rgba(95,227,200,.14); border-color:rgba(95,227,200,.32); }
       .notesbtn { display:flex; align-items:center; gap:6px; height:30px; padding:0 9px; border:1px solid var(--border-card);
         border-radius:8px; background:transparent; color:var(--muted); font-family:var(--mono); font-size:12px; font-weight:600; }
       .notesbtn:hover { color:var(--text); border-color:var(--border-subtle); }
@@ -109,13 +120,13 @@
       /* marks panel — popover anchored to the pill */
       .panel { position:fixed; z-index:4; width:min(340px, calc(100dvw - 24px)); max-height:min(520px, 70dvh);
         background:var(--panel); border:1px solid var(--border); border-radius:14px; display:none; flex-direction:column;
-        overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); animation:fadein .14s ease-out; }
+        overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
       .header { display:flex; align-items:center; gap:11px; padding:14px 14px 10px; }
       .title { font-size:13px; font-weight:600; line-height:1; }
       .count { font-size:11px; color:var(--muted); margin-top:3px; }
-      .credit { padding:0 14px 10px; font-family:var(--mono); font-size:10px; color:var(--faint); text-align:center; }
+      .credit { padding:0 14px 10px; font-family:var(--mono); font-size:10px; color:var(--muted); text-align:center; }
       .credit a { color:inherit; text-decoration:none; }
-      .credit a:hover { color:var(--muted); }
+      .credit a:hover { color:var(--text); }
       .credit svg { vertical-align:-1px; }
       .iconbtn { width:30px; height:30px; margin-left:auto; border:1px solid var(--border-card); border-radius:8px;
         background:transparent; display:flex; align-items:center; justify-content:center; padding:0; color:var(--muted); }
@@ -133,13 +144,13 @@
       .tag { font-family:var(--mono); font-size:10.5px; color:var(--accent); background:var(--tag-bg);
         border:1px solid var(--tag-border); border-radius:5px; padding:2px 7px; font-weight:600; }
       .ref { font-family:var(--mono); font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .page { font-family:var(--mono); font-size:10.5px; color:var(--dim); background:var(--neutral); border-radius:5px;
+      .page { font-family:var(--mono); font-size:10.5px; color:var(--muted); background:var(--neutral); border-radius:5px;
         padding:2px 7px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .actions { margin-left:auto; font-size:11px; color:var(--muted); display:flex; gap:6px; flex:none; }
-      .actions span { cursor:pointer; }
-      .actions span:hover { color:var(--text); }
+      .actions { margin-left:auto; font-size:11px; color:var(--muted); display:flex; align-items:center; gap:6px; flex:none; }
+      .actions button { background:none; border:none; padding:0; color:inherit; font:inherit; cursor:pointer; }
+      .actions button:hover { color:var(--text); }
       .msg { font-size:13px; line-height:1.45; color:var(--text); white-space:pre-wrap; word-break:break-word; }
-      .stale { font-size:11px; color:var(--dim); margin-top:7px; }
+      .stale { font-size:11px; color:var(--muted); margin-top:7px; }
       .editrow { display:flex; gap:7px; margin-top:9px; }
       .empty { color:var(--muted); font-size:12.5px; line-height:1.5; text-align:center; padding:24px 8px; }
 
@@ -150,6 +161,9 @@
       .primary { flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:38px; border:none;
         border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:13px; font-weight:700; }
       .primary[disabled] { opacity:.45; cursor:default; }
+      /* while a note composer / card editor is open, that Save owns the accent fill */
+      .primary.waiting { background:var(--neutral); color:var(--muted); }
+      .primary.waiting kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
       .ghost { height:38px; padding:0 16px; border:1px solid var(--border-subtle); border-radius:9px; background:transparent;
         color:var(--muted); font-size:13px; }
 
@@ -167,9 +181,15 @@
       /* composer */
       .popup { position:fixed; z-index:6; width:min(280px, calc(100dvw - 16px)); background:var(--composer);
         border:1px solid var(--border-subtle); border-radius:10px; padding:12px; display:none;
-        box-shadow:0 12px 30px -8px rgba(0,0,0,.4); color:var(--text); animation:fadein .14s ease-out; }
+        box-shadow:0 12px 30px -8px rgba(0,0,0,.4); color:var(--text); }
+      .popuphead { display:flex; align-items:center; gap:6px; margin-bottom:9px; }
       .popup .tagfill { font-family:var(--mono); font-size:10.5px; color:var(--accent-ink); background:var(--accent);
-        border-radius:4px; padding:2px 7px; display:inline-block; font-weight:600; margin-bottom:9px; }
+        border-radius:4px; padding:2px 7px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .walk { margin-left:auto; display:flex; gap:4px; flex:none; }
+      .walkbtn { width:24px; height:24px; padding:0; border:1px solid var(--border-subtle); border-radius:6px;
+        background:transparent; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+      .walkbtn:hover:not([disabled]) { color:var(--text); }
+      .walkbtn[disabled] { opacity:.35; cursor:default; }
       .popup textarea { margin-bottom:11px; }
       .btnrow { display:flex; gap:7px; }
       .btn-save { display:flex; align-items:center; gap:7px; height:28px; padding:0 8px 0 12px; border:none; border-radius:7px;
@@ -180,8 +200,7 @@
       /* send dialog */
       .dialog { position:fixed; z-index:8; top:50%; left:50%; transform:translate(-50%,-50%); width:min(700px, 90dvw);
         max-height:85dvh; padding:16px; background:var(--panel); border:1px solid var(--border); border-radius:14px;
-        display:none; flex-direction:column; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text);
-        animation:fadeinC .14s ease-out; }
+        display:none; flex-direction:column; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
       .dialog textarea { flex:1; min-height:160px; margin:12px 0; overflow:auto; resize:none; font-family:var(--mono); }
       .dialoghead { display:flex; justify-content:space-between; align-items:center; }
 
@@ -191,12 +210,30 @@
       .confirmbox { width:300px; background:var(--panel); border:1px solid var(--border); border-radius:12px;
         padding:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
 
-      @keyframes fadein { from { opacity:0; transform:translateY(4px); } }
-      @keyframes fadeinC { from { opacity:0; transform:translate(-50%, calc(-50% + 4px)); } }
-      @media (prefers-reduced-motion: reduce) {
-        .pill.snap { transition:none; }
-        .panel, .popup, .dialog { animation:none; }
+      /* motion — durations/easing per DESIGN.md; everything lives behind
+         no-preference so reduced-motion needs zero overrides */
+      @media (prefers-reduced-motion: no-preference) {
+        button { transition:color .15s ease, background-color .15s ease, border-color .15s ease, transform .1s var(--ease-out); }
+        button:not([disabled]):active { transform:scale(.97); }
+        .dot:not([disabled]):active { transform:translate(-45%,-45%) scale(.9); }
+        .pill.snap { transition:left .2s var(--ease-out), top .2s var(--ease-out); }
+        .panel.snap { transition:left .2s var(--ease-out), right .2s var(--ease-out), top .2s var(--ease-out), bottom .2s var(--ease-out); }
+        .panel[data-dir="up"] { transform-origin:bottom center; animation:riseIn .16s var(--ease-out); }
+        .panel[data-dir="down"] { transform-origin:top center; animation:dropIn .16s var(--ease-out); }
+        .popup { transform-origin:top left; animation:dropIn .16s var(--ease-out); }
+        .tip { animation:fadeIn .12s ease-out; }
+        .dialog { animation:zoomC .2s var(--ease-out); }
+        .confirm { animation:fadeIn .16s ease-out; }
+        .confirmbox { animation:riseIn .16s var(--ease-out); }
+        .notesbtn.pulse { animation:pulse .25s var(--ease-out); }
+        .mark.flash { animation:flashRing .8s var(--ease-out); }
       }
+      @keyframes fadeIn { from { opacity:0; } }
+      @keyframes riseIn { from { opacity:0; transform:translateY(6px) scale(.98); } }
+      @keyframes dropIn { from { opacity:0; transform:translateY(-6px) scale(.98); } }
+      @keyframes zoomC { from { opacity:0; transform:translate(-50%,-50%) scale(.96); } }
+      @keyframes pulse { 50% { transform:scale(1.15); } }
+      @keyframes flashRing { from { box-shadow:0 0 0 6px rgba(95,227,200,.35); } }
     </style>
 
     <div class="highlight"></div>
@@ -205,8 +242,8 @@
 
     <div class="pill pe" role="group" aria-label="Agent Marker">
       <span class="grip" aria-hidden="true">${icon("grip-vertical", 16)}</span>
-      <span class="logo">${logoSvg(20)}</span>
-      <button class="markbtn onaccent" id="mark" title="Mark elements (M)">Mark <kbd aria-hidden="true">M</kbd></button>
+      <span class="logo">${logoSvg(20, true)}</span>
+      <button class="markbtn" id="mark" title="Mark elements (M)">Mark <kbd aria-hidden="true">M</kbd></button>
       <button class="notesbtn" id="notes" aria-expanded="false">${icon("list", 14)}<span id="pillcount">0</span></button>
       <button class="sendbtn" id="pillsend" aria-label="Generate prompt">${icon("terminal", 15)}</button>
     </div>
@@ -230,7 +267,13 @@
     </div>
 
     <div class="popup pe" role="dialog" aria-label="Add note">
-      <span class="tagfill" id="popupTag"></span>
+      <div class="popuphead">
+        <span class="tagfill" id="popupTag"></span>
+        <span class="walk">
+          <button class="walkbtn" id="walkup" title="Target parent (⌥↑)" aria-label="Target parent element">${icon("chevron-up", 14)}</button>
+          <button class="walkbtn" id="walkdown" title="Back to child (⌥↓)" aria-label="Back to child element">${icon("chevron-down", 14)}</button>
+        </span>
+      </div>
       <textarea id="msg" rows="3" placeholder="What should change here?"></textarea>
       <div class="btnrow">
         <button class="btn-save onaccent" id="ok">Save <kbd aria-hidden="true">⌘↵</kbd></button>
@@ -272,9 +315,16 @@
 
   // --- helpers ------------------------------------------------------------
   const inOurUI = (e) => e.composedPath().includes(host);
-  const isTyping = () => {
-    const a = root.activeElement || document.activeElement;
-    return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+  // Pass the keydown event when available: composedPath()[0] sees the real
+  // target inside the page's open shadow roots, where document.activeElement
+  // only reports the shadow host (e.g. a <custom-input> web component).
+  const isTyping = (e) => {
+    let a = (e && typeof e.composedPath === "function" && e.composedPath()[0]) || null;
+    if (!(a instanceof Element)) {
+      a = root.activeElement || document.activeElement;
+      while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    }
+    return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
   };
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
   const motionOK = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -286,7 +336,9 @@
   function setState(patch) {
     state = { ...state, ...patch };
     render();
-    try { chrome.storage.session.set({ [tabKey]: state }); } catch { die(); }
+    // Async rejection (extension reloaded, quota) as well as sync throw:
+    try { chrome.storage.session.set({ [tabKey]: state }).catch(() => { if (!chrome.runtime?.id) die(); }); }
+    catch { die(); }
   }
 
   // Hashed/generated class names (css-modules, styled-components, emotion…)
@@ -338,7 +390,8 @@
   const hideHighlight = () => { highlight.style.display = "none"; tagLabel.style.display = "none"; };
 
   function onMove(e) {
-    if (!state?.open || !state.marking || popupOpen || inOurUI(e)) { if (!cardHover) hideHighlight(); return; }
+    if (popupOpen) return; // highlight is pinned to the composer's target
+    if (!state?.open || !state.marking || inOurUI(e)) { if (!cardHover) hideHighlight(); return; }
     const el = e.target;
     if (!el || el === document.body || el === document.documentElement) { hideHighlight(); return; }
     if (el !== hoverEl) { hoverEl = el; lockChain = []; }
@@ -347,8 +400,10 @@
 
   function onClick(e) {
     if (!state?.open) return;
+    if (!chrome.runtime?.id) return die(); // extension was reloaded under us
     if (popupOpen) {
       if (e.composedPath().includes(popup)) return; // interacting with the composer
+      if (inOurUI(e)) { if (!$("msg").value.trim()) closePopup(); return; } // pill/panel stay usable
       e.preventDefault();
       e.stopPropagation();
       if (!$("msg").value.trim()) closePopup(); // click-outside closes only when empty
@@ -361,11 +416,36 @@
     openPopup(lockChain.length ? pickTarget() : e.target);
   }
 
+  const syncPrimary = () => $("send").classList.toggle("waiting", popupOpen || editingId != null);
+
+  const hasParent = (el) => { const p = el?.parentElement; return p && p !== document.body && p !== document.documentElement; };
+  function retarget(up) {
+    if (!popupEl) return;
+    if (up) {
+      if (!hasParent(popupEl)) return;
+      popupChain.push(popupEl);
+      popupEl = popupEl.parentElement;
+    } else {
+      if (!popupChain.length) return;
+      popupEl = popupChain.pop();
+    }
+    $("popupTag").textContent = descOf(popupEl);
+    paintHighlight(popupEl);
+    $("walkup").disabled = !hasParent(popupEl);
+    $("walkdown").disabled = !popupChain.length;
+  }
+  $("walkup").onclick = () => { retarget(true); $("msg").focus(); };
+  $("walkdown").onclick = () => { retarget(false); $("msg").focus(); };
+
   function openPopup(el) {
     if (!el) return;
     popupOpen = true;
     popupEl = el;
-    hideHighlight();
+    popupChain = [];
+    syncPrimary();
+    paintHighlight(el);
+    $("walkup").disabled = !hasParent(el);
+    $("walkdown").disabled = true;
     $("popupTag").textContent = descOf(el);
     $("msg").value = "";
     const r = el.getBoundingClientRect();
@@ -374,7 +454,14 @@
     Object.assign(popup.style, { display: "block", top: Math.max(8, top) + "px", left: Math.max(8, left) + "px" });
     $("msg").focus();
   }
-  function closePopup() { popupOpen = false; popup.style.display = "none"; popupEl = null; }
+  function closePopup() {
+    popupOpen = false;
+    popup.style.display = "none";
+    popupEl = null;
+    popupChain = [];
+    syncPrimary();
+    if (!cardHover) hideHighlight();
+  }
 
   $("ok").onclick = () => {
     const message = $("msg").value.trim();
@@ -411,13 +498,22 @@
     }
     positionPill();
     const n = marks().length;
+    if (lastCount >= 0 && n > lastCount) {
+      const nb = $("notes");
+      nb.classList.remove("pulse");
+      void nb.offsetWidth; // restart the pulse animation
+      nb.classList.add("pulse");
+    }
+    lastCount = n;
     $("pillcount").textContent = String(n);
     $("notes").setAttribute("aria-label", `Show marks (${n})`);
     $("notes").setAttribute("aria-expanded", String(!!state.listOpen));
     $("notes").classList.toggle("active", !!state.listOpen);
     $("mark").classList.toggle("active", !!state.marking);
+    $("mark").setAttribute("aria-pressed", String(!!state.marking));
     $("pillsend").disabled = n === 0;
     $("send").disabled = n === 0;
+    syncPrimary();
     panel.style.display = state.listOpen ? "flex" : "none";
     if (state.listOpen) {
       const pages = new Set(marks().map((m) => m.url)).size;
@@ -432,10 +528,12 @@
   function renderList() {
     const list = $("list");
     list.innerHTML = "";
+    // The hovered card was just detached — removed nodes never get mouseleave.
+    if (cardHover) { cardHover = false; hideHighlight(); }
     if (!marks().length) {
       const p = document.createElement("div");
       p.className = "empty";
-      p.textContent = "No marks yet. Press M, then click any element — ↑/↓ walks to parents, Enter confirms.";
+      p.textContent = "No marks yet. Press M, then click any element on the page.";
       list.appendChild(p);
       return;
     }
@@ -469,27 +567,32 @@
       if (editingId === m.id) {
         li.appendChild(head);
         const ta = document.createElement("textarea");
-        ta.rows = 2; ta.value = m.message;
+        ta.rows = 2;
+        ta.value = editDraft ?? m.message; // draft survives re-renders
+        ta.oninput = () => { editDraft = ta.value; };
         const row = document.createElement("div");
         row.className = "editrow";
         const saveBtn = document.createElement("button");
         saveBtn.className = "btn-save onaccent"; saveBtn.textContent = "Save";
-        saveBtn.onclick = () => { const v = ta.value.trim(); if (v) m.message = v; editingId = null; setState({ marks: marks() }); };
+        saveBtn.onclick = () => { const v = ta.value.trim(); if (v) m.message = v; editingId = null; editDraft = null; setState({ marks: marks() }); };
         const cancel = document.createElement("button");
         cancel.className = "btn-cancel onneutral"; cancel.textContent = "Cancel";
-        cancel.onclick = () => { editingId = null; render(); };
+        cancel.onclick = () => { editingId = null; editDraft = null; render(); };
         ta.addEventListener("keydown", (e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveBtn.click(); }
         });
         row.append(saveBtn, cancel);
         li.append(ta, row);
         ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
       } else {
         const actions = document.createElement("span");
         actions.className = "actions";
-        const edit = document.createElement("span"); edit.textContent = "Edit";
-        edit.onclick = () => { editingId = m.id; render(); };
-        const del = document.createElement("span"); del.textContent = "Delete";
+        const edit = document.createElement("button"); edit.textContent = "Edit";
+        edit.setAttribute("aria-label", `Edit mark ${i + 1}`);
+        edit.onclick = () => { editingId = m.id; editDraft = null; render(); };
+        const del = document.createElement("button"); del.textContent = "Delete";
+        del.setAttribute("aria-label", `Delete mark ${i + 1}`);
         del.onclick = () => { cardHover = false; hideHighlight(); setState({ marks: marks().filter((x) => x.id !== m.id) }); };
         actions.append(edit, document.createTextNode("·"), del);
         head.appendChild(actions);
@@ -580,7 +683,7 @@
 
   $("mark").onclick = () => setState({ marking: !state.marking });
   $("notes").onclick = () => setState({ listOpen: !state.listOpen });
-  $("panelclose").onclick = () => setState({ listOpen: false });
+  $("panelclose").onclick = () => { setState({ listOpen: false }); $("notes").focus(); };
   $("send").onclick = doSend;
   $("pillsend").onclick = doSend;
   $("clear").onclick = () => {
@@ -621,9 +724,14 @@
   }
 
   function positionPanel() {
-    const pr = pill.getBoundingClientRect();
+    // Anchor to the pill's target position (style.left/top), not its rendered
+    // rect — during a corner snap the rect is mid-transition and the panel
+    // would stick to the drop point instead of the corner.
+    const left = parseFloat(pill.style.left) || 0, top = parseFloat(pill.style.top) || 0;
+    const pr = { left, top, width: pill.offsetWidth, right: left + pill.offsetWidth, bottom: top + pill.offsetHeight };
     const below = pr.top < window.innerHeight / 2;
     const space = below ? window.innerHeight - pr.bottom - 8 - MARGIN : pr.top - 8 - MARGIN;
+    panel.dataset.dir = below ? "down" : "up"; // entrance animates away from the pill
     panel.style.maxHeight = Math.min(520, Math.max(160, space)) + "px";
     panel.style.top = below ? pr.bottom + 8 + "px" : "";
     panel.style.bottom = below ? "" : window.innerHeight - pr.top + 8 + "px";
@@ -664,7 +772,8 @@
         if (Math.hypot(x - cx, y - cy) < SNAP) { pos = { corner: c }; break; }
       }
       pill.classList.add("snap");
-      setTimeout(() => pill.classList.remove("snap"), 300);
+      panel.classList.add("snap");
+      setTimeout(() => { pill.classList.remove("snap"); panel.classList.remove("snap"); }, 300);
       setState({ pos });
     };
     pill.addEventListener("pointermove", onDrag);
@@ -672,19 +781,40 @@
     pill.addEventListener("pointercancel", onUp);
   });
 
+  // Minimal focus trap for the two aria-modal surfaces (dialog, confirm).
+  function trapTab(container, e) {
+    const els = container.querySelectorAll("button, textarea, a[href]");
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    const active = root.activeElement;
+    if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    else if (!container.contains(active)) { e.preventDefault(); first.focus(); }
+  }
+
   // --- global shortcuts ---------------------------------------------------
   window.addEventListener("keydown", (e) => {
     if (!state?.open) return;
+    if (!chrome.runtime?.id) return die(); // extension was reloaded under us
     if (e.key === "Escape") {
       if (confirmEl.style.display === "flex") return closeConfirm();
-      if (popupOpen) return closePopup();
+      if (popupOpen) { closePopup(); return $("mark").focus(); }
       if (dialog.style.display === "flex") return closeDialog();
-      if (editingId != null) { editingId = null; return render(); }
+      if (editingId != null) { editingId = null; editDraft = null; render(); return $("notes").focus(); }
       if (state.marking) return setState({ marking: false });
-      if (state.listOpen) return setState({ listOpen: false });
+      if (state.listOpen) { setState({ listOpen: false }); return $("notes").focus(); }
       return;
     }
-    if (popupOpen || isTyping() || e.metaKey || e.ctrlKey || e.altKey) return;
+    // While a modal is up: trap Tab inside it, suppress the global shortcuts.
+    const modal = confirmEl.style.display === "flex" ? confirmEl : dialog.style.display === "flex" ? dialog : null;
+    if (modal) { if (e.key === "Tab") trapTab(modal, e); return; }
+    // ⌥↑/⌥↓ retarget the composer's element — before the typing guard so they
+    // work while the note textarea has focus.
+    if (popupOpen && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      return retarget(e.key === "ArrowUp");
+    }
+    if (popupOpen || isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (state.marking && highlight.style.display === "block" && !cardHover) {
       if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -719,6 +849,8 @@
   window.addEventListener("resize", () => state?.open && render());
 
   try {
+    // background pings before opening, to check this script is alive here
+    chrome.runtime.onMessage.addListener((msg, _s, respond) => { if (msg === "ping") respond(true); });
     chrome.runtime.sendMessage("tabId", (id) => {
       if (chrome.runtime.lastError || id == null) return;
       tabKey = "tab:" + id;
@@ -726,7 +858,7 @@
       chrome.storage.session.onChanged.addListener((c) => {
         if (!c[tabKey]) return;
         state = c[tabKey].newValue || null;
-        if (editingId != null && !marks().some((m) => m.id === editingId)) editingId = null;
+        if (editingId != null && !marks().some((m) => m.id === editingId)) { editingId = null; editDraft = null; }
         render();
       });
     });

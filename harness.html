@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Marker harness</title>
+<!--
+  Dev-only manual test page — NOT part of the shipped extension.
+  Open via file://, then in the console: toggleExt() opens/closes the pill
+  (mirrors background.js), extState() dumps the per-tab state.
+  Stubs chrome.runtime / chrome.storage.session and loads ./content.js.
+-->
+<style>
+  body { font-family: system-ui; margin: 0; }
+  header { padding: 24px 32px; background: #eef2f5; }
+  main { padding: 32px; max-width: 720px; }
+  .cardgrid { display: flex; gap: 16px; }
+  .card { border: 1px solid #ccc; border-radius: 8px; padding: 16px; flex: 1; }
+  footer { padding: 24px 32px; background: #222; color: #eee; margin-top: 600px; }
+</style>
+</head>
+<body>
+<script>
+  // chrome.* stub — mimics session storage + onChanged + the tabId handshake.
+  const listeners = [];
+  const store = {};
+  window.chrome = {
+    runtime: {
+      id: "harness",
+      getManifest: () => ({ version: "0.0.0-harness" }),
+      getURL: (p) => p,
+      sendMessage: (msg, cb) => setTimeout(() => cb(1), 0),
+      onMessage: { addListener: () => {} },
+      lastError: null,
+    },
+    storage: {
+      session: {
+        get: (k) => Promise.resolve(store[k] === undefined ? {} : { [k]: store[k] }),
+        set: (obj) => {
+          const changes = {};
+          for (const [k, v] of Object.entries(obj)) {
+            changes[k] = { oldValue: store[k], newValue: JSON.parse(JSON.stringify(v)) };
+            store[k] = changes[k].newValue;
+          }
+          listeners.forEach((f) => f(changes));
+          return Promise.resolve();
+        },
+        remove: (k) => { delete store[k]; return Promise.resolve(); },
+        onChanged: { addListener: (f) => listeners.push(f) },
+      },
+    },
+  };
+  // Simulate the toolbar button (background.js behavior).
+  window.toggleExt = async () => {
+    const cur = store["tab:1"];
+    if (cur?.open) chrome.storage.session.set({ "tab:1": { ...cur, open: false, marking: false, listOpen: false } });
+    else {
+      const marks = cur?.marks || [];
+      chrome.storage.session.set({ "tab:1": { ...cur, open: true, marking: marks.length === 0, listOpen: marks.length > 0, marks } });
+    }
+  };
+  window.extState = () => store["tab:1"];
+</script>
+
+<header>
+  <h1 id="site-title">Harness Site</h1>
+  <nav class="mainnav"><a href="#a">Alpha</a> · <a href="#b">Beta</a></nav>
+</header>
+<main>
+  <section class="hero">
+    <h2 class="hero-title">Big hero heading</h2>
+    <p class="hero-copy">Some copy that describes the product in a sentence or two.</p>
+    <button id="cta" class="btn btn-primary">Get started</button>
+  </section>
+  <section class="cardgrid" aria-label="Cards">
+    <article class="card"><h3>Card one</h3><p>First card body text.</p></article>
+    <article class="card"><h3>Card two</h3><p>Second card body text.</p></article>
+    <article class="card css-1q2w3e sc-bxivhb pretty"><h3>Card three</h3><p>Hashed-class card.</p></article>
+  </section>
+</main>
+<footer><p class="fineprint">Footer fine print — scroll target.</p></footer>
+
+<script src="content.js"></script>
+</body>
+</html>

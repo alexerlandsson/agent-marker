@@ -16,26 +16,36 @@ icon on the extension card (and reload the target page for `content.js` changes)
 
 ## Architecture
 
-Three scripts share state through `chrome.storage.local` — there is no message
-passing between them; each observes storage and re-renders.
+State is **per tab** and lives in `chrome.storage.session` under `"tab:<id>"`
+as one object: `{ open, marking, listOpen, pos, marks }`. Session storage
+clears when the browser closes, so marks never outlive a session; closing a
+tab wipes its key. There is exactly **one runtime message** in the extension —
+the content script asks background for its tab id (`"tabId"`) at startup;
+everything else flows through `storage.session.onChanged`.
 
-- **`background.js`** (service worker) — toolbar icon toggles the `open` flag.
-  Owns the reset lifecycle: `onStartup`/`onInstalled` and every close wipe
-  `{ open, marking, minimized, marks }`. Marks are deliberately **session-scoped**
-  so they never leak between sites/sessions — don't add persistence without a reason.
-- **`content.js`** — the entire UI. Injected on `<all_urls>` at `document_idle`.
-  Runs inside a closed IIFE and renders into a **shadow root** (`attachShadow`)
+- **`background.js`** (service worker) — calls `setAccessLevel` so content
+  scripts can read session storage, answers the `"tabId"` handshake, toggles
+  `open` on toolbar click (**hiding keeps the tab's marks** — only tab close /
+  browser exit wipes them), cleans up on `tabs.onRemoved`, and mirrors each
+  tab's mark count into the toolbar badge.
+- **`content.js`** — the entire UI. Injected on `<all_urls>` at `document_idle`,
+  top frame only. Runs inside a closed IIFE and renders into a **shadow root**
   to isolate styles from the host page. All design tokens are CSS custom
-  properties on `:host`. Key flow: `onMove`/`onClick` (marking) → `openPopup`
-  (note composer) → `cssPath` builds the selector → mark saved to storage →
-  `render`/`renderList` → `buildPrompt`/`doSend`.
-- **`manifest.json`** — permissions: `storage`, `activeTab`, `scripting`;
-  `host_permissions: <all_urls>`.
+  properties on `:host`. The main view is a **floating pill** that drags
+  anywhere and **snaps to viewport corners** (`pos` is `{corner}` or `{x,y}`);
+  the marks panel is a popover anchored to it. Key flow: `onMove`/`onClick`
+  (marking, with ArrowUp/Down parent-walk) → `openPopup` (note composer) →
+  `cssPath` builds the selector → `setState({marks})` → `render`/`renderList`/
+  `updateDots` → `buildPrompt`/`doSend`. Numbered dots pin to marked elements
+  on the current page and match the list/prompt numbering.
+- **`manifest.json`** — permissions: `storage` only; `host_permissions:
+  <all_urls>`; `minimum_chrome_version: 110` (session-storage access level +
+  badge text color).
 
-State (`open`, `marking`, `minimized`, `marks`, `barPos`) lives only in storage.
-Mutate it via `setState`/`save` (thin wrappers over `chrome.storage.local.set`);
-the `storage.onChanged` listener drives all re-rendering. Don't hold UI state in
-locals expecting it to persist across pages.
+Mutate state only via `setState` (patches the local copy, renders
+optimistically, then persists); `storage.session.onChanged` drives re-renders
+from background writes. Don't hold UI state in locals expecting it to persist
+across pages.
 
 ## Conventions specific to this repo
 
@@ -44,8 +54,21 @@ locals expecting it to persist across pages.
   the face reaches into the shadow DOM) using `chrome.runtime.getURL`. This
   exists to bypass strict page CSPs — keep it. Both are declared in
   `web_accessible_resources`.
-- **`DESIGN.md` is the design-token source of truth.** Colors, radii, shadows,
-  and sizes there map 1:1 to the CSS custom properties in `content.js`. Change
-  tokens in both, and keep the keyboard-shortcut tables in `DESIGN.md` and
-  `README.md` in sync with the `keydown` handlers in `content.js`.
-- Global shortcuts (`M`, `S`) are suppressed while typing — gate on `isTyping()`.
+- **`DESIGN.md` is the design-token source of truth.** Colors and the mono
+  font map 1:1 to CSS custom properties on `:host` in `content.js`; radii,
+  shadows, and sizes are literals there — change both places together, and
+  keep the keyboard-shortcut tables in `DESIGN.md` and `README.md` in sync
+  with the `keydown` handlers in `content.js`.
+- Global shortcuts (`M`, `S`, `L`) are suppressed while typing — gate on
+  `isTyping()`. `Escape` closes strictly top-down: confirm → composer → prompt
+  dialog → card editor → marking mode → panel.
+- `cssPath` prefers `id` / `data-testid`-style hooks and **filters
+  hashed/generated class names** (`stableClass`) so selectors stay findable in
+  source code.
+- The user-facing action is **"Generate prompt"** (terminal icon) — nothing is
+  sent anywhere; the dialog just offers the prompt for copying.
+- To manually test without loading the extension, open `harness.html` (repo
+  root) via `file://` — it stubs `chrome.runtime`/`chrome.storage.session`,
+  loads `./content.js`, and exposes `toggleExt()` / `extState()` on `window`
+  for driving state from the console. It is dev-only and not part of the
+  shipped extension.

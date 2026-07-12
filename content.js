@@ -1,6 +1,9 @@
 // Agent Marker content script.
-// State lives in chrome.storage.local so marks persist across pages/tabs and
-// panel state survives navigation. Design: dark teal theme (see DESIGN.md).
+// Per-tab state lives in chrome.storage.session under "tab:<id>" — background.js
+// owns open/close and answers the one-time "tabId" handshake message. The UI is
+// a floating pill that snaps to viewport corners; the marks panel, note
+// composer, prompt dialog and confirm overlay all hang off it.
+// Design: dark teal theme (see DESIGN.md).
 
 (() => {
   if (window.__agentMarkerLoaded) return;
@@ -9,27 +12,39 @@
   // Inlined lucide icons (MIT). 24x24 viewBox, stroke = currentColor.
   const ICONS = {
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
-    "minimize-2": '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/>',
-    "maximize-2": '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
     "grip-vertical": '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
-    github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
     copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    "chevron-up": '<path d="m18 15-6-6-6 6"/>',
+    "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+    "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+    list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
   };
   const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 
-  // Brand logo (see logo.svg).
-  const logoSvg = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 128 128" fill="none" aria-hidden="true">` +
-    `<rect width="128" height="128" rx="30" fill="#191A1C"/>` +
+  // Brand logo (see logo.svg). Panel: chip on card tokens (stroke-width 6 ≈ 1px
+  // at 20-24px) so it sits like a mark card. Pill: bare glyph, no backdrop.
+  const logoSvg = (s, bare) => `<svg width="${s}" height="${s}" viewBox="0 0 128 128" fill="none" aria-hidden="true">` +
+    (bare ? "" : `<rect x="3" y="3" width="122" height="122" rx="27" fill="var(--card)" stroke="var(--border-card)" stroke-width="6"/>`) +
     `<text x="64" y="82" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="82" letter-spacing="-2" fill="#F2F3F5">A</text>` +
     `<rect x="33" y="92" width="62" height="10" rx="5" fill="#5FE3C8" transform="rotate(-3 64 97)"/></svg>`;
 
-  let open = false;       // panel/bar visible (toolbar icon)
-  let marking = false;    // marker mode (Mark / key M)
-  let minimized = false;  // collapsed to floating mini-bar
-  let barPos = null;      // {x,y} mini-bar position
-  let popupOpen = false;
-  let editingId = null;
-  let marks = [];
+  const MARGIN = 12;      // gap between pill/panel and the viewport edge
+  const SNAP = 96;        // px radius around a corner that snaps the pill to it
+
+  let tabKey = null;      // "tab:<id>", learned from background.js
+  let state = null;       // { open, marking, listOpen, pos, marks } — mirrors storage
+  let editingId = null;   // mark id being edited in the list
+  let editDraft = null;   // in-progress edit text — survives re-renders (resize, storage echo)
+  let popupOpen = false;  // note composer visible
+  let popupEl = null;     // element the composer is for
+  let popupChain = [];    // children walked up from via ⌥↑, for ⌥↓
+  let hoverEl = null;     // element under the cursor while marking
+  let lockChain = [];     // ancestors walked to with ArrowUp
+  let cardHover = false;  // a list card is previewing its element
+  let lastFocus = null;   // focus to restore when dialog/confirm closes
+  let lastCount = -1;     // previous mark count, for the count-pulse animation
 
   // Load Geist / Geist Mono from bundled files. They're web_accessible_resources
   // loaded from a chrome-extension:// URL, which is exempt from the page CSP
@@ -51,69 +66,106 @@
   root.innerHTML = `
     <style>
       :host {
-        --bg:#0c0d0f; --panel:#161719; --card:#1e2023; --composer:#1a1b1e; --neutral:#26282b;
+        --panel:#161719; --card:#1e2023; --composer:#1a1b1e; --neutral:#26282b;
         --border:#303236; --border-card:#2c2f33; --border-subtle:#34363a; --divider:#26282b;
-        --text:#e7e9ec; --muted:#8b929b; --dim:#6c7178; --faint:#5b6068;
+        --text:#e7e9ec; --muted:#8b929b;
         --accent:#5fe3c8; --accent-ink:#062b24; --tag-bg:#0f2a25; --tag-border:#1c4c43;
         --mono:'Geist Mono',ui-monospace,monospace;
+        --ease-out:cubic-bezier(.165,.84,.44,1);
         font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;
       }
       * { box-sizing:border-box; }
       button { font-family:inherit; cursor:pointer; }
+      :where(button,a,textarea):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
       .pe { pointer-events:auto; }
 
-      /* highlight overlay */
-      .highlight { position:fixed; pointer-events:none; border:2px solid var(--accent); border-radius:4px;
+      /* host is one isolated stacking context; local z 0-9 */
+      .highlight { position:fixed; z-index:0; pointer-events:none; border:2px solid var(--accent); border-radius:4px;
         box-shadow:0 0 0 4px rgba(95,227,200,.18); display:none; }
-      .tagLabel { position:fixed; pointer-events:none; font-family:var(--mono); font-size:11px;
-        background:#1a1b1e; color:var(--accent); padding:3px 8px; border-radius:5px; display:none; white-space:nowrap; }
+      .tagLabel { position:fixed; z-index:1; pointer-events:none; font-family:var(--mono); font-size:11px;
+        background:var(--composer); color:var(--accent); padding:3px 8px; border-radius:5px; display:none; white-space:nowrap; }
 
-      /* docked panel */
-      .panel { position:fixed; top:0.25rem; right:0.25rem; bottom:0.25rem; width:360px; background:var(--panel);
-        border:1px solid var(--border); border-radius:14px; display:none; flex-direction:column; overflow:hidden;
-        box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
-      .header { display:flex; align-items:center; gap:11px; padding:16px; }
+      /* numbered chips on marked elements */
+      .dots { position:fixed; inset:0; z-index:2; pointer-events:none; }
+      .dot { position:fixed; width:18px; height:18px; padding:0; border:none; border-radius:50%;
+        background:var(--accent); color:var(--accent-ink); font:600 10px/18px var(--mono); text-align:center;
+        transform:translate(-45%,-45%); box-shadow:0 2px 8px rgba(0,0,0,.45); }
+
+      /* floating pill — the main view */
+      .pill { position:fixed; z-index:5; height:44px; display:none; align-items:center; gap:6px; padding:0 6px 0 8px;
+        background:var(--panel); border:1px solid var(--border-card); border-radius:12px; color:var(--text);
+        box-shadow:0 14px 34px -8px rgba(0,0,0,.5); cursor:grab; touch-action:none; user-select:none; }
+      .pill.dragging { cursor:grabbing; }
+      .grip { display:flex; color:#5a5e64; }
       .logo { display:flex; flex:none; }
       .logo svg { display:block; }
-      .title { font-size:13px; font-weight:600; line-height:1; display:flex; align-items:center; gap:6px; }
-      .ghlink { display:inline-flex; color:var(--muted); }
-      .ghlink:hover { color:var(--text); }
+      /* Mark is a mode toggle: active = accent tint, never a fill — fills are
+         reserved for the one action that commits the current step. */
+      .markbtn { display:flex; align-items:center; gap:6px; height:30px; padding:0 8px 0 10px; border:1px solid var(--border-card);
+        border-radius:8px; background:transparent; color:var(--muted); font-size:12px; font-weight:600; }
+      .markbtn:hover { color:var(--text); border-color:var(--border-subtle); }
+      .markbtn.active { background:var(--tag-bg); border-color:var(--accent); color:var(--accent); }
+      .markbtn kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
+      .markbtn.active kbd { background:rgba(95,227,200,.14); border-color:rgba(95,227,200,.32); }
+      .notesbtn { display:flex; align-items:center; gap:6px; height:30px; padding:0 9px; border:1px solid var(--border-card);
+        border-radius:8px; background:transparent; color:var(--muted); font-family:var(--mono); font-size:12px; font-weight:600; }
+      .notesbtn:hover { color:var(--text); border-color:var(--border-subtle); }
+      .notesbtn.active { background:var(--neutral); color:var(--text); }
+      .sendbtn { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:none;
+        border-radius:8px; background:transparent; color:#cfd3d8; }
+      .sendbtn:hover { color:var(--accent); }
+      .sendbtn[disabled] { opacity:.4; cursor:default; }
+      .sendbtn[disabled]:hover { color:#cfd3d8; }
+
+      /* marks panel — popover anchored to the pill */
+      .panel { position:fixed; z-index:4; width:min(340px, calc(100dvw - 24px)); max-height:min(520px, 70dvh);
+        background:var(--panel); border:1px solid var(--border); border-radius:14px; display:none; flex-direction:column;
+        overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
+      .header { display:flex; align-items:center; gap:11px; padding:14px 14px 10px; }
+      .title { font-size:13px; font-weight:600; line-height:1; }
       .count { font-size:11px; color:var(--muted); margin-top:3px; }
-      .htools { margin-left:auto; display:flex; align-items:center; gap:8px; }
-      .iconbtn { width:32px; height:32px; border:1px solid var(--border-card); border-radius:8px; background:transparent;
-        display:flex; align-items:center; justify-content:center; padding:0; color:var(--muted); }
+      .credit { padding:0 14px 10px; font-family:var(--mono); font-size:10px; color:var(--muted); text-align:center; }
+      .credit a { color:inherit; text-decoration:none; }
+      .credit a:hover { color:var(--text); }
+      .credit svg { vertical-align:-1px; }
+      .iconbtn { width:30px; height:30px; margin-left:auto; border:1px solid var(--border-card); border-radius:8px;
+        background:transparent; display:flex; align-items:center; justify-content:center; padding:0; color:var(--muted); }
       .iconbtn:hover { color:var(--text); }
-      .markbtn { display:flex; align-items:center; gap:8px; height:32px; padding:0 10px 0 13px; border:1px solid var(--accent);
-        border-radius:8px; background:transparent; color:var(--accent); font-size:12.5px; font-weight:600; }
-      .markbtn.active { background:var(--accent); color:var(--accent-ink); }
 
       .list { flex:1; overflow-y:auto; padding:4px 14px 12px; display:flex; flex-direction:column; gap:10px; }
       .list::-webkit-scrollbar { width:10px; }
       .list::-webkit-scrollbar-thumb { background:#3a3d42; border-radius:8px; border:3px solid transparent; background-clip:content-box; }
-      .mark { background:var(--card); border:1px solid var(--border-card); border-radius:11px; padding:13px 13px 11px; }
-      .markhead { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+      .mark { background:var(--card); border:1px solid var(--border-card); border-radius:11px; padding:11px 13px; }
+      .mark.flash { border-color:var(--accent); box-shadow:0 0 0 3px rgba(95,227,200,.25); }
+      .markhead { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+      .num { flex:none; width:18px; height:18px; padding:0; border:none; border-radius:50%; background:var(--accent);
+        color:var(--accent-ink); font:600 10px/18px var(--mono); text-align:center; }
+      span.num { background:var(--neutral); color:var(--muted); }
       .tag { font-family:var(--mono); font-size:10.5px; color:var(--accent); background:var(--tag-bg);
         border:1px solid var(--tag-border); border-radius:5px; padding:2px 7px; font-weight:600; }
-      .ref { font-family:var(--mono); font-size:11px; color:var(--muted); }
-      .actions { margin-left:auto; font-size:11px; color:var(--muted); display:flex; gap:6px; }
-      .actions span { cursor:pointer; }
-      .actions span:hover { color:var(--text); }
+      .ref { font-family:var(--mono); font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .page { font-family:var(--mono); font-size:10.5px; color:var(--muted); background:var(--neutral); border-radius:5px;
+        padding:2px 7px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .actions { margin-left:auto; font-size:11px; color:var(--muted); display:flex; align-items:center; gap:6px; flex:none; }
+      .actions button { background:none; border:none; padding:0; color:inherit; font:inherit; cursor:pointer; }
+      .actions button:hover { color:var(--text); }
       .msg { font-size:13px; line-height:1.45; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+      .stale { font-size:11px; color:var(--muted); margin-top:7px; }
       .editrow { display:flex; gap:7px; margin-top:9px; }
-      .empty { color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px; }
+      .empty { color:var(--muted); font-size:12.5px; line-height:1.5; text-align:center; padding:24px 8px; }
 
       textarea { width:100%; background:#111214; color:var(--text); border:1px solid var(--border-subtle);
         border-radius:8px; padding:8px; font:13px/1.4 inherit; resize:vertical; }
 
-      .footer { padding:14px 16px; border-top:1px solid var(--divider); display:flex; align-items:center; gap:10px; }
+      .footer { padding:12px 14px; border-top:1px solid var(--divider); display:flex; align-items:center; gap:10px; }
       .primary { flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:38px; border:none;
         border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:13px; font-weight:700; }
       .primary[disabled] { opacity:.45; cursor:default; }
+      /* while a note composer / card editor is open, that Save owns the accent fill */
+      .primary.waiting { background:var(--neutral); color:var(--muted); }
+      .primary.waiting kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
       .ghost { height:38px; padding:0 16px; border:1px solid var(--border-subtle); border-radius:9px; background:transparent;
         color:var(--muted); font-size:13px; }
-      .mini { display:flex; align-items:center; gap:8px; height:28px; padding:0 8px 0 12px; border:none; border-radius:7px;
-        background:var(--neutral); color:var(--muted); font-size:12px; }
-      .mini.accent { background:var(--accent); color:var(--accent-ink); font-weight:600; }
 
       /* kbd hints */
       kbd { font-family:var(--mono); font-size:10px; font-weight:600; line-height:1; padding:3px 5px; border-radius:4px;
@@ -121,26 +173,23 @@
       .onaccent kbd { background:rgba(6,43,36,.14); border-color:rgba(6,43,36,.22); }
       .onneutral kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
 
-      /* mini-bar */
-      .bar { position:fixed; height:48px; background:var(--panel); border:1px solid var(--border-card); border-radius:13px;
-        display:none; align-items:center; gap:10px; padding:0 8px 0 10px; box-shadow:0 14px 34px -8px rgba(0,0,0,.5); color:var(--text); }
-      .grip { display:flex; align-items:center; padding:0 1px; cursor:grab; color:#5a5e64; }
-      .barcount { font-family:var(--mono); font-size:11px; color:var(--muted); }
-      .vr { width:1px; height:22px; background:var(--border-card); margin:0 2px; }
-      .barmark { display:flex; align-items:center; gap:6px; height:32px; padding:0 10px; border:1px solid var(--accent);
-        border-radius:8px; background:transparent; color:var(--accent); font-size:12.5px; font-weight:600; }
-      .barmark.active { background:var(--accent); color:var(--accent-ink); }
-      .barsend { display:flex; align-items:center; gap:6px; height:32px; padding:0 10px; border:none; border-radius:8px;
-        background:transparent; color:#cfd3d8; font-size:12.5px; font-weight:600; }
-      .expand { margin-left:auto; width:30px; height:30px; border:1px solid var(--border-card); border-radius:8px; background:transparent;
-        color:var(--muted); display:flex; align-items:center; justify-content:center; }
-      .expand:hover { color:var(--text); border-color:var(--border-subtle); }
+      /* pill button tooltip */
+      .tip { position:fixed; z-index:7; pointer-events:none; display:none; align-items:center; gap:6px;
+        background:var(--composer); border:1px solid var(--border-subtle); border-radius:6px; padding:4px 8px;
+        color:var(--text); font-size:11px; white-space:nowrap; box-shadow:0 12px 30px -8px rgba(0,0,0,.4); }
 
       /* composer */
-      .popup { position:fixed; pointer-events:auto; width:280px; background:var(--composer); border:1px solid var(--border-subtle);
-        border-radius:10px; padding:12px; display:none; box-shadow:0 12px 30px -8px rgba(0,0,0,.4); color:var(--text); }
+      .popup { position:fixed; z-index:6; width:min(280px, calc(100dvw - 16px)); background:var(--composer);
+        border:1px solid var(--border-subtle); border-radius:10px; padding:12px; display:none;
+        box-shadow:0 12px 30px -8px rgba(0,0,0,.4); color:var(--text); }
+      .popuphead { display:flex; align-items:center; gap:6px; margin-bottom:9px; }
       .popup .tagfill { font-family:var(--mono); font-size:10.5px; color:var(--accent-ink); background:var(--accent);
-        border-radius:4px; padding:2px 7px; display:inline-block; font-weight:600; margin-bottom:9px; }
+        border-radius:4px; padding:2px 7px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .walk { margin-left:auto; display:flex; gap:4px; flex:none; }
+      .walkbtn { width:24px; height:24px; padding:0; border:1px solid var(--border-subtle); border-radius:6px;
+        background:transparent; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+      .walkbtn:hover:not([disabled]) { color:var(--text); }
+      .walkbtn[disabled] { opacity:.35; cursor:default; }
       .popup textarea { margin-bottom:11px; }
       .btnrow { display:flex; gap:7px; }
       .btn-save { display:flex; align-items:center; gap:7px; height:28px; padding:0 8px 0 12px; border:none; border-radius:7px;
@@ -149,76 +198,105 @@
         background:var(--neutral); color:var(--muted); font-size:12px; }
 
       /* send dialog */
-      .dialog { position:fixed; pointer-events:auto; top:50%; left:50%; transform:translate(-50%,-50%); width:min(700px,90vw);
-        max-height:85vh; padding:16px; background:var(--panel); border:1px solid var(--border); border-radius:14px;
+      .dialog { position:fixed; z-index:8; top:50%; left:50%; transform:translate(-50%,-50%); width:min(700px, 90dvw);
+        max-height:85dvh; padding:16px; background:var(--panel); border:1px solid var(--border); border-radius:14px;
         display:none; flex-direction:column; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
       .dialog textarea { flex:1; min-height:160px; margin:12px 0; overflow:auto; resize:none; font-family:var(--mono); }
       .dialoghead { display:flex; justify-content:space-between; align-items:center; }
 
       /* confirm overlay */
-      .confirm { position:fixed; inset:0; pointer-events:auto; background:rgba(0,0,0,.55); display:none;
+      .confirm { position:fixed; z-index:9; inset:0; background:rgba(0,0,0,.55); display:none;
         align-items:center; justify-content:center; }
       .confirmbox { width:300px; background:var(--panel); border:1px solid var(--border); border-radius:12px;
         padding:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); color:var(--text); }
+
+      /* motion — durations/easing per DESIGN.md; everything lives behind
+         no-preference so reduced-motion needs zero overrides */
+      @media (prefers-reduced-motion: no-preference) {
+        button { transition:color .15s ease, background-color .15s ease, border-color .15s ease, transform .1s var(--ease-out); }
+        button:not([disabled]):active { transform:scale(.97); }
+        .dot:not([disabled]):active { transform:translate(-45%,-45%) scale(.9); }
+        .pill.snap { transition:left .2s var(--ease-out), top .2s var(--ease-out); }
+        .panel.snap { transition:left .2s var(--ease-out), right .2s var(--ease-out), top .2s var(--ease-out), bottom .2s var(--ease-out); }
+        .panel[data-dir="up"] { transform-origin:bottom center; animation:riseIn .16s var(--ease-out); }
+        .panel[data-dir="down"] { transform-origin:top center; animation:dropIn .16s var(--ease-out); }
+        .popup { transform-origin:top left; animation:dropIn .16s var(--ease-out); }
+        .tip { animation:fadeIn .12s ease-out; }
+        .dialog { animation:zoomC .2s var(--ease-out); }
+        .confirm { animation:fadeIn .16s ease-out; }
+        .confirmbox { animation:riseIn .16s var(--ease-out); }
+        .notesbtn.pulse { animation:pulse .25s var(--ease-out); }
+        .mark.flash { animation:flashRing .8s var(--ease-out); }
+      }
+      @keyframes fadeIn { from { opacity:0; } }
+      @keyframes riseIn { from { opacity:0; transform:translateY(6px) scale(.98); } }
+      @keyframes dropIn { from { opacity:0; transform:translateY(-6px) scale(.98); } }
+      @keyframes zoomC { from { opacity:0; transform:translate(-50%,-50%) scale(.96); } }
+      @keyframes pulse { 50% { transform:scale(1.15); } }
+      @keyframes flashRing { from { box-shadow:0 0 0 6px rgba(95,227,200,.35); } }
     </style>
 
-    <div class="highlight pe" style="pointer-events:none;"></div>
+    <div class="highlight"></div>
     <div class="tagLabel"></div>
+    <div class="dots" id="dots"></div>
 
-    <div class="panel">
+    <div class="pill pe" role="group" aria-label="Agent Marker">
+      <span class="grip" aria-hidden="true">${icon("grip-vertical", 16)}</span>
+      <span class="logo">${logoSvg(20, true)}</span>
+      <button class="markbtn" id="mark" title="Mark elements (M)">Mark <kbd aria-hidden="true">M</kbd></button>
+      <button class="notesbtn" id="notes" aria-expanded="false">${icon("list", 14)}<span id="pillcount">0</span></button>
+      <button class="sendbtn" id="pillsend" aria-label="Generate prompt">${icon("terminal", 15)}</button>
+    </div>
+    <div class="tip" aria-hidden="true"></div>
+
+    <div class="panel pe" role="dialog" aria-label="Marks">
       <div class="header">
-        <div class="logo">${logoSvg(26)}</div>
+        <div class="logo">${logoSvg(24)}</div>
         <div>
-          <div class="title">Agent Marker<a class="ghlink pe" href="https://github.com/alexerlandsson/agent-marker" target="_blank" rel="noopener noreferrer" title="View on GitHub" aria-label="View on GitHub">${icon("github", 13)}</a></div>
+          <div class="title">Agent Marker</div>
           <div class="count" id="count"></div>
         </div>
-        <div class="htools">
-          <button class="iconbtn pe" id="minimize" title="Minimize to floating bar" aria-label="Minimize">${icon("minimize-2", 15)}</button>
-          <button class="markbtn onaccent pe" id="mark">Mark <kbd>M</kbd></button>
-        </div>
+        <button class="iconbtn" id="panelclose" title="Close (Esc)" aria-label="Close marks">${icon("x", 15)}</button>
       </div>
-      <div class="list pe" id="list"></div>
+      <div class="list" id="list"></div>
       <div class="footer">
-        <button class="primary onaccent pe" id="send">Send to agent <kbd>S</kbd></button>
-        <button class="ghost pe" id="clear">Clear</button>
+        <button class="primary onaccent" id="send">${icon("terminal", 15)} Generate prompt <kbd aria-hidden="true">S</kbd></button>
+        <button class="ghost" id="clear">Clear</button>
       </div>
+      <div class="credit"><span id="version"></span> · <a href="https://github.com/alexerlandsson/agent-marker" target="_blank" rel="noopener noreferrer">GitHub ${icon("external-link", 9)}</a></div>
     </div>
 
-    <div class="bar">
-      <div class="grip pe" id="grip" title="Drag">${icon("grip-vertical", 18)}</div>
-      <div class="logo barlogo">${logoSvg(22)}</div>
-      <span class="barcount" id="barcount">0</span>
-      <span class="vr"></span>
-      <button class="barmark onaccent pe" id="barmark">Mark <kbd>M</kbd></button>
-      <button class="barsend onneutral pe" id="barsend">Send <kbd>S</kbd></button>
-      <button class="expand pe" id="expand" title="Expand to panel" aria-label="Expand">${icon("maximize-2", 15)}</button>
-    </div>
-
-    <div class="popup">
-      <span class="tagfill" id="popupTag"></span>
+    <div class="popup pe" role="dialog" aria-label="Add note">
+      <div class="popuphead">
+        <span class="tagfill" id="popupTag"></span>
+        <span class="walk">
+          <button class="walkbtn" id="walkup" title="Target parent (⌥↑)" aria-label="Target parent element">${icon("chevron-up", 14)}</button>
+          <button class="walkbtn" id="walkdown" title="Back to child (⌥↓)" aria-label="Back to child element">${icon("chevron-down", 14)}</button>
+        </span>
+      </div>
       <textarea id="msg" rows="3" placeholder="What should change here?"></textarea>
       <div class="btnrow">
-        <button class="btn-save onaccent pe" id="ok">Save <kbd>⌘↵</kbd></button>
-        <button class="btn-cancel onneutral pe" id="cancel">Cancel <kbd>Esc</kbd></button>
+        <button class="btn-save onaccent" id="ok">Save <kbd aria-hidden="true">⌘↵</kbd></button>
+        <button class="btn-cancel onneutral" id="cancel">Cancel <kbd aria-hidden="true">Esc</kbd></button>
       </div>
     </div>
 
-    <div class="dialog">
+    <div class="dialog pe" role="dialog" aria-modal="true" aria-label="Prompt for your agent">
       <div class="dialoghead">
         <b>Prompt for your agent</b>
-        <button class="iconbtn pe" id="dialogClose" title="Close" aria-label="Close">${icon("x", 18)}</button>
+        <button class="iconbtn" id="dialogClose" style="margin-left:0;" title="Close (Esc)" aria-label="Close">${icon("x", 18)}</button>
       </div>
-      <textarea id="prompt" readonly></textarea>
-      <button class="primary onaccent pe" id="copy" style="flex:none; align-self:flex-start; padding:0 16px;">${icon("copy", 15)} Copy prompt</button>
+      <textarea id="prompt" readonly aria-label="Generated prompt"></textarea>
+      <button class="primary onaccent" id="copy" style="flex:none; align-self:flex-start; padding:0 16px;">${icon("copy", 15)} Copy prompt</button>
     </div>
 
-    <div class="confirm">
-      <div class="confirmbox">
+    <div class="confirm pe">
+      <div class="confirmbox" role="dialog" aria-modal="true" aria-label="Clear all marks?">
         <div style="font-size:1rem; font-weight:600; margin-bottom:1rem;">Clear all marks?</div>
-        <div style="font-size:0.875rem; color:var(--muted); margin-bottom:1rem;">This removes every mark on every page. This can't be undone.</div>
+        <div style="font-size:0.875rem; color:var(--muted); margin-bottom:1rem;">This removes every mark in this tab. This can't be undone.</div>
         <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="ghost pe" id="confirmCancel" style="height:34px; padding:0 14px;">Cancel</button>
-          <button class="pe" id="confirmClear" style="height:34px; padding:0 14px; border:none; border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:13px; font-weight:600;">Clear all</button>
+          <button class="ghost" id="confirmCancel" style="height:34px; padding:0 14px;">Cancel</button>
+          <button id="confirmClear" style="height:34px; padding:0 14px; border:none; border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:13px; font-weight:600;">Clear all</button>
         </div>
       </div>
     </div>
@@ -228,28 +306,57 @@
   const $ = (id) => root.getElementById(id);
   const highlight = root.querySelector(".highlight");
   const tagLabel = root.querySelector(".tagLabel");
+  const dots = $("dots");
+  const pill = root.querySelector(".pill");
   const panel = root.querySelector(".panel");
-  const bar = root.querySelector(".bar");
   const popup = root.querySelector(".popup");
   const dialog = root.querySelector(".dialog");
   const confirmEl = root.querySelector(".confirm");
 
-  let popupEl = null;
-
   // --- helpers ------------------------------------------------------------
   const inOurUI = (e) => e.composedPath().includes(host);
-  const isTyping = () => {
-    const a = root.activeElement || document.activeElement;
-    return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+  // Pass the keydown event when available: composedPath()[0] sees the real
+  // target inside the page's open shadow roots, where document.activeElement
+  // only reports the shadow host (e.g. a <custom-input> web component).
+  const isTyping = (e) => {
+    let a = (e && typeof e.composedPath === "function" && e.composedPath()[0]) || null;
+    if (!(a instanceof Element)) {
+      a = root.activeElement || document.activeElement;
+      while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    }
+    return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
   };
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  const motionOK = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const marks = () => (state && state.marks) || [];
+  const pickTarget = () => lockChain[lockChain.length - 1] || hoverEl;
+
+  // The extension was reloaded/removed under us — take the zombie UI down.
+  const die = () => { host.remove(); fontStyle.remove(); };
+  function setState(patch) {
+    state = { ...state, ...patch };
+    render();
+    // Async rejection (extension reloaded, quota) as well as sync throw:
+    try { chrome.storage.session.set({ [tabKey]: state }).catch(() => { if (!chrome.runtime?.id) die(); }); }
+    catch { die(); }
+  }
+
+  // Hashed/generated class names (css-modules, styled-components, emotion…)
+  // don't exist in source code, so they make selectors the agent can't find.
+  const stableClass = (c) => /^[a-zA-Z][a-zA-Z0-9_-]{0,23}$/.test(c) && !/^(css|sc|jss|chakra|emotion)-|\d{3,}/.test(c);
 
   function cssPath(el) {
     if (el.id) return `#${CSS.escape(el.id)}`;
+    for (const attr of ["data-testid", "data-test-id", "data-test", "data-cy"]) {
+      const v = el.getAttribute(attr);
+      if (v) return `${el.nodeName.toLowerCase()}[${attr}="${v.replace(/["\\]/g, "\\$&")}"]`;
+    }
     const parts = [];
     while (el && el.nodeType === 1 && el !== document.body) {
       let sel = el.nodeName.toLowerCase();
       if (el.id) { parts.unshift(`#${CSS.escape(el.id)}`); break; }
-      if (el.classList.length) sel += "." + [...el.classList].map((c) => CSS.escape(c)).join(".");
+      const cls = [...el.classList].filter(stableClass).slice(0, 2);
+      if (cls.length) sel += "." + cls.map((c) => CSS.escape(c)).join(".");
       const parent = el.parentElement;
       if (parent) {
         const same = [...parent.children].filter((c) => c.nodeName === el.nodeName);
@@ -263,16 +370,18 @@
 
   const tagOf = (el) => el.nodeName.toLowerCase();
   const refOf = (el) => (el.id ? `#${el.id}` : el.classList.length ? `.${el.classList[0]}` : "");
-  const descOf = (el) => tagOf(el) + (el.id ? `#${el.id}` : el.classList.length ? "." + [...el.classList].join(".") : "");
-
-  const save = () => chrome.storage.local.set({ marks });
-  const setState = (o) => chrome.storage.local.set(o);
+  const descOf = (el) => {
+    const cls = [...el.classList].slice(0, 3).join(".");
+    return tagOf(el) + (el.id ? `#${el.id}` : cls ? `.${cls}${el.classList.length > 3 ? "…" : ""}` : "");
+  };
+  const shortUrl = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return u; } };
+  const findMarkEl = (m) => {
+    if (m.url !== location.href) return null;
+    try { return document.querySelector(m.selector); } catch { return null; }
+  };
 
   // --- marking flow -------------------------------------------------------
-  function onMove(e) {
-    if (!open || !marking || popupOpen || inOurUI(e)) { hideHighlight(); return; }
-    const el = e.target;
-    if (!el || el === document.body) { hideHighlight(); return; }
+  function paintHighlight(el) {
     const r = el.getBoundingClientRect();
     Object.assign(highlight.style, { display: "block", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
     tagLabel.textContent = `${descOf(el)} · ${Math.round(r.width)}×${Math.round(r.height)}`;
@@ -280,24 +389,63 @@
   }
   const hideHighlight = () => { highlight.style.display = "none"; tagLabel.style.display = "none"; };
 
+  function onMove(e) {
+    if (popupOpen) return; // highlight is pinned to the composer's target
+    if (!state?.open || !state.marking || inOurUI(e)) { if (!cardHover) hideHighlight(); return; }
+    const el = e.target;
+    if (!el || el === document.body || el === document.documentElement) { hideHighlight(); return; }
+    if (el !== hoverEl) { hoverEl = el; lockChain = []; }
+    paintHighlight(pickTarget());
+  }
+
   function onClick(e) {
+    if (!state?.open) return;
+    if (!chrome.runtime?.id) return die(); // extension was reloaded under us
     if (popupOpen) {
       if (e.composedPath().includes(popup)) return; // interacting with the composer
+      if (inOurUI(e)) { if (!$("msg").value.trim()) closePopup(); return; } // pill/panel stay usable
       e.preventDefault();
       e.stopPropagation();
       if (!$("msg").value.trim()) closePopup(); // click-outside closes only when empty
       return;
     }
-    if (!open || !marking || inOurUI(e)) return;
+    if (state.listOpen && !state.marking && !inOurUI(e)) setState({ listOpen: false }); // popover behavior
+    if (!state.marking || inOurUI(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    popupEl = e.target;
-    openPopup(e.target);
+    openPopup(lockChain.length ? pickTarget() : e.target);
   }
 
+  const syncPrimary = () => $("send").classList.toggle("waiting", popupOpen || editingId != null);
+
+  const hasParent = (el) => { const p = el?.parentElement; return p && p !== document.body && p !== document.documentElement; };
+  function retarget(up) {
+    if (!popupEl) return;
+    if (up) {
+      if (!hasParent(popupEl)) return;
+      popupChain.push(popupEl);
+      popupEl = popupEl.parentElement;
+    } else {
+      if (!popupChain.length) return;
+      popupEl = popupChain.pop();
+    }
+    $("popupTag").textContent = descOf(popupEl);
+    paintHighlight(popupEl);
+    $("walkup").disabled = !hasParent(popupEl);
+    $("walkdown").disabled = !popupChain.length;
+  }
+  $("walkup").onclick = () => { retarget(true); $("msg").focus(); };
+  $("walkdown").onclick = () => { retarget(false); $("msg").focus(); };
+
   function openPopup(el) {
+    if (!el) return;
     popupOpen = true;
-    hideHighlight();
+    popupEl = el;
+    popupChain = [];
+    syncPrimary();
+    paintHighlight(el);
+    $("walkup").disabled = !hasParent(el);
+    $("walkdown").disabled = true;
     $("popupTag").textContent = descOf(el);
     $("msg").value = "";
     const r = el.getBoundingClientRect();
@@ -306,20 +454,28 @@
     Object.assign(popup.style, { display: "block", top: Math.max(8, top) + "px", left: Math.max(8, left) + "px" });
     $("msg").focus();
   }
-  function closePopup() { popupOpen = false; popup.style.display = "none"; popupEl = null; }
+  function closePopup() {
+    popupOpen = false;
+    popup.style.display = "none";
+    popupEl = null;
+    popupChain = [];
+    syncPrimary();
+    if (!cardHover) hideHighlight();
+  }
 
   $("ok").onclick = () => {
     const message = $("msg").value.trim();
     if (!message || !popupEl) return closePopup();
-    marks.push({
-      id: String(marks.length ? Math.max(...marks.map((m) => +m.id)) + 1 : 1),
+    const ms = marks().slice();
+    ms.push({
+      id: String(ms.length ? Math.max(...ms.map((m) => +m.id)) + 1 : 1),
       url: location.href, title: document.title,
       selector: cssPath(popupEl), tag: tagOf(popupEl), ref: refOf(popupEl),
       element: descOf(popupEl), text: (popupEl.textContent || "").trim().slice(0, 80),
       message,
     });
-    save();
     closePopup();
+    setState({ marks: ms });
   };
   $("cancel").onclick = closePopup;
   $("msg").addEventListener("keydown", (e) => {
@@ -329,163 +485,382 @@
 
   // --- render -------------------------------------------------------------
   function render() {
-    const show = open && !minimized;
-    panel.style.display = show ? "flex" : "none";
-    bar.style.display = open && minimized ? "flex" : "none";
-    $("mark").classList.toggle("active", marking);
-    $("barmark").classList.toggle("active", marking);
-    $("count").textContent = `${marks.length} element${marks.length === 1 ? "" : "s"} marked`;
-    $("barcount").textContent = String(marks.length);
-    $("send").disabled = marks.length === 0;
-    positionBar();
-    if (!open) { hideHighlight(); return; }
-    renderList();
+    const openNow = !!state?.open;
+    pill.style.display = openNow ? "flex" : "none";
+    if (!openNow) {
+      panel.style.display = "none";
+      dialog.style.display = "none";
+      confirmEl.style.display = "none";
+      closePopup();
+      hideHighlight();
+      dots.textContent = "";
+      return;
+    }
+    positionPill();
+    const n = marks().length;
+    if (lastCount >= 0 && n > lastCount) {
+      const nb = $("notes");
+      nb.classList.remove("pulse");
+      void nb.offsetWidth; // restart the pulse animation
+      nb.classList.add("pulse");
+    }
+    lastCount = n;
+    $("pillcount").textContent = String(n);
+    $("notes").setAttribute("aria-label", `Show marks (${n})`);
+    $("notes").setAttribute("aria-expanded", String(!!state.listOpen));
+    $("notes").classList.toggle("active", !!state.listOpen);
+    $("mark").classList.toggle("active", !!state.marking);
+    $("mark").setAttribute("aria-pressed", String(!!state.marking));
+    $("pillsend").disabled = n === 0;
+    $("send").disabled = n === 0;
+    syncPrimary();
+    panel.style.display = state.listOpen ? "flex" : "none";
+    if (state.listOpen) {
+      const pages = new Set(marks().map((m) => m.url)).size;
+      $("count").textContent = `${n} mark${n === 1 ? "" : "s"}${pages > 1 ? ` · ${pages} pages` : ""}`;
+      renderList();
+      positionPanel();
+    }
+    if (!state.marking) { hoverEl = null; lockChain = []; if (!cardHover) hideHighlight(); }
+    updateDots();
   }
 
   function renderList() {
     const list = $("list");
     list.innerHTML = "";
-    if (!marks.length) {
+    // The hovered card was just detached — removed nodes never get mouseleave.
+    if (cardHover) { cardHover = false; hideHighlight(); }
+    if (!marks().length) {
       const p = document.createElement("div");
       p.className = "empty";
-      p.textContent = "No marks yet. Click Mark, then click an element on the page.";
+      p.textContent = "No marks yet. Press M, then click any element on the page.";
       list.appendChild(p);
       return;
     }
-    marks.forEach((m) => {
+    marks().forEach((m, i) => {
       const li = document.createElement("div");
       li.className = "mark";
+      li.dataset.id = m.id;
+      const here = m.url === location.href;
+      const el = findMarkEl(m);
+
       const head = document.createElement("div");
       head.className = "markhead";
+      const num = document.createElement(el ? "button" : "span");
+      num.className = "num";
+      num.textContent = String(i + 1);
+      if (el) {
+        num.title = "Scroll to element";
+        num.setAttribute("aria-label", `Scroll to element ${i + 1}`);
+        num.onclick = () => el.scrollIntoView({ block: "center", behavior: motionOK() ? "smooth" : "auto" });
+        li.onmouseenter = () => { cardHover = true; paintHighlight(el); };
+        li.onmouseleave = () => { cardHover = false; hideHighlight(); };
+      }
+      head.appendChild(num);
       const tag = document.createElement("span");
       tag.className = "tag";
       tag.textContent = `<${m.tag || "el"}>`;
       head.appendChild(tag);
       if (m.ref) { const ref = document.createElement("span"); ref.className = "ref"; ref.textContent = m.ref; head.appendChild(ref); }
-      const actions = document.createElement("span");
-      actions.className = "actions";
+      if (!here) { const pg = document.createElement("span"); pg.className = "page"; pg.textContent = shortUrl(m.url); pg.title = m.url; head.appendChild(pg); }
 
       if (editingId === m.id) {
         li.appendChild(head);
         const ta = document.createElement("textarea");
-        ta.rows = 2; ta.value = m.message;
+        ta.rows = 2;
+        ta.value = editDraft ?? m.message; // draft survives re-renders
+        ta.oninput = () => { editDraft = ta.value; };
         const row = document.createElement("div");
         row.className = "editrow";
         const saveBtn = document.createElement("button");
-        saveBtn.className = "btn-save onaccent pe"; saveBtn.textContent = "Save";
-        saveBtn.onclick = () => { const v = ta.value.trim(); if (v) m.message = v; editingId = null; save(); };
+        saveBtn.className = "btn-save onaccent"; saveBtn.textContent = "Save";
+        saveBtn.onclick = () => { const v = ta.value.trim(); if (v) m.message = v; editingId = null; editDraft = null; setState({ marks: marks() }); };
         const cancel = document.createElement("button");
-        cancel.className = "btn-cancel onneutral pe"; cancel.textContent = "Cancel";
-        cancel.onclick = () => { editingId = null; render(); };
+        cancel.className = "btn-cancel onneutral"; cancel.textContent = "Cancel";
+        cancel.onclick = () => { editingId = null; editDraft = null; render(); };
+        ta.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveBtn.click(); }
+        });
         row.append(saveBtn, cancel);
         li.append(ta, row);
         ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
       } else {
-        const edit = document.createElement("span"); edit.textContent = "Edit";
-        edit.onclick = () => { editingId = m.id; render(); };
-        const del = document.createElement("span"); del.textContent = "Delete";
-        del.onclick = () => { marks = marks.filter((x) => x.id !== m.id); save(); };
+        const actions = document.createElement("span");
+        actions.className = "actions";
+        const edit = document.createElement("button"); edit.textContent = "Edit";
+        edit.setAttribute("aria-label", `Edit mark ${i + 1}`);
+        edit.onclick = () => { editingId = m.id; editDraft = null; render(); };
+        const del = document.createElement("button"); del.textContent = "Delete";
+        del.setAttribute("aria-label", `Delete mark ${i + 1}`);
+        del.onclick = () => { cardHover = false; hideHighlight(); setState({ marks: marks().filter((x) => x.id !== m.id) }); };
         actions.append(edit, document.createTextNode("·"), del);
         head.appendChild(actions);
         li.appendChild(head);
         const msg = document.createElement("div"); msg.className = "msg"; msg.textContent = m.message;
         li.appendChild(msg);
+        if (here && !el) { const s = document.createElement("div"); s.className = "stale"; s.textContent = "Element no longer found on this page"; li.appendChild(s); }
       }
       list.appendChild(li);
     });
   }
 
-  const shortUrl = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return u; } };
+  // Numbered chips pinned to each marked element on the current page.
+  function updateDots() {
+    dots.textContent = "";
+    if (!state?.open) return;
+    marks().forEach((m, i) => {
+      const el = findMarkEl(m);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return;
+      const d = document.createElement("button");
+      d.className = "dot pe";
+      d.textContent = String(i + 1);
+      d.title = m.message;
+      d.setAttribute("aria-label", `Show mark ${i + 1}: ${m.message}`);
+      d.style.left = r.left + "px";
+      d.style.top = r.top + "px";
+      d.onclick = (e) => { e.stopPropagation(); openCard(m.id); };
+      dots.appendChild(d);
+    });
+  }
 
-  function buildPrompt(marks) {
+  function openCard(id) {
+    setState({ listOpen: true });
+    const card = $("list").querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    card.scrollIntoView({ block: "nearest", behavior: motionOK() ? "smooth" : "auto" });
+    card.classList.add("flash");
+    setTimeout(() => card.classList.remove("flash"), 900);
+  }
+
+  // --- prompt / send -------------------------------------------------------
+  function buildPrompt(ms) {
     const byUrl = {};
-    marks.forEach((m) => (byUrl[m.url] ||= []).push(m));
-    let out = `I marked ${marks.length} element(s) that need changes. For each, use the CSS selector and page URL to find the matching code and make the change.\n`;
+    ms.forEach((m) => (byUrl[m.url] ||= []).push(m));
+    let out = `I marked ${ms.length} element(s) on a running web app that need changes. For each item, use the CSS selector, element description and text snippet to find the matching code (the page URL tells you the route), then make the change. Generated class names may not exist in source — fall back to the element's text and structure. Only change what each item asks for.\n`;
     for (const [url, items] of Object.entries(byUrl)) {
       out += `\n## ${items[0].title || url}\n${url}\n`;
-      items.forEach((m, i) => {
-        out += `\n${i + 1}. Selector: \`${m.selector}\`\n   Element: ${m.element}${m.text ? ` — "${m.text}"` : ""}\n   Change: ${m.message}\n`;
+      items.forEach((m) => {
+        out += `\n${ms.indexOf(m) + 1}. Selector: \`${m.selector}\`\n   Element: ${m.element}${m.text ? ` — "${m.text}"` : ""}\n   Change: ${m.message}\n`;
       });
     }
     return out;
   }
 
   function doSend() {
-    if (!marks.length) return;
-    $("prompt").value = buildPrompt(marks);
+    if (!marks().length) return;
+    $("prompt").value = buildPrompt(marks());
+    lastFocus = root.activeElement || document.activeElement;
     dialog.style.display = "flex";
+    $("copy").focus();
+  }
+  function closeDialog() {
+    dialog.style.display = "none";
+    if (lastFocus?.isConnected) lastFocus.focus();
+    lastFocus = null;
   }
 
   // --- controls -----------------------------------------------------------
-  $("mark").onclick = () => setState({ marking: !marking });
-  $("barmark").onclick = () => setState({ marking: !marking });
+  const tip = root.querySelector(".tip");
+  function bindTip(btn, label, kbdKey) {
+    const show = () => {
+      tip.innerHTML = `${label} <kbd>${kbdKey}</kbd>`;
+      tip.style.display = "flex";
+      const b = btn.getBoundingClientRect(), t = tip.getBoundingClientRect();
+      tip.style.left = clamp(b.left + b.width / 2 - t.width / 2, 4, window.innerWidth - t.width - 4) + "px";
+      tip.style.top = (b.top > t.height + 12 ? b.top - t.height - 8 : b.bottom + 8) + "px";
+    };
+    const hide = () => { tip.style.display = "none"; };
+    btn.addEventListener("pointerenter", show);
+    btn.addEventListener("focus", show);
+    for (const ev of ["pointerleave", "blur", "click"]) btn.addEventListener(ev, hide);
+  }
+  bindTip($("notes"), "Marks", "L");
+  bindTip($("pillsend"), "Generate prompt", "S");
+
+  $("mark").onclick = () => setState({ marking: !state.marking });
+  $("notes").onclick = () => setState({ listOpen: !state.listOpen });
+  $("panelclose").onclick = () => { setState({ listOpen: false }); $("notes").focus(); };
   $("send").onclick = doSend;
-  $("barsend").onclick = doSend;
-  $("minimize").onclick = () => setState({ minimized: true });
-  $("expand").onclick = () => setState({ minimized: false });
-  $("clear").onclick = () => { if (marks.length) confirmEl.style.display = "flex"; };
-  $("confirmCancel").onclick = () => { confirmEl.style.display = "none"; };
-  confirmEl.onclick = (e) => { if (e.target === confirmEl) confirmEl.style.display = "none"; };
-  $("confirmClear").onclick = () => { marks = []; save(); confirmEl.style.display = "none"; };
-  $("dialogClose").onclick = () => { dialog.style.display = "none"; };
+  $("pillsend").onclick = doSend;
+  $("clear").onclick = () => {
+    if (!marks().length) return;
+    lastFocus = root.activeElement || document.activeElement;
+    confirmEl.style.display = "flex";
+    $("confirmCancel").focus();
+  };
+  const closeConfirm = () => {
+    confirmEl.style.display = "none";
+    if (lastFocus?.isConnected) lastFocus.focus();
+    lastFocus = null;
+  };
+  $("confirmCancel").onclick = closeConfirm;
+  confirmEl.onclick = (e) => { if (e.target === confirmEl) closeConfirm(); };
+  $("confirmClear").onclick = () => { closeConfirm(); setState({ marks: [] }); };
+  $("dialogClose").onclick = closeDialog;
   $("copy").onclick = async () => {
-    await navigator.clipboard.writeText($("prompt").value);
-    $("copy").textContent = "Copied!";
-    setTimeout(() => ($("copy").innerHTML = `${icon("copy", 15)} Copy prompt`), 1200);
+    const ta = $("prompt");
+    try { await navigator.clipboard.writeText(ta.value); }
+    catch { ta.focus(); ta.select(); document.execCommand("copy"); $("copy").focus(); }
+    $("copy").innerHTML = `${icon("check", 15)} Copied`;
+    setTimeout(() => { $("copy").innerHTML = `${icon("copy", 15)} Copy prompt`; }, 1200);
   };
 
-  // --- mini-bar drag ------------------------------------------------------
-  function positionBar() {
-    const off = parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.25; // 0.25rem
-    if (!barPos) { bar.style.left = off + "px"; bar.style.top = (window.innerHeight - 48 - off) + "px"; return; }
-    const w = bar.offsetWidth || 360, h = 48;
-    bar.style.left = Math.max(off, Math.min(barPos.x, window.innerWidth - w - off)) + "px";
-    bar.style.top = Math.max(off, Math.min(barPos.y, window.innerHeight - h - off)) + "px";
+  // --- pill position, drag & corner snap -----------------------------------
+  function positionPill() {
+    const w = pill.offsetWidth, h = pill.offsetHeight;
+    const p = state.pos || { corner: "br" };
+    const x = p.corner
+      ? (p.corner.includes("l") ? MARGIN : window.innerWidth - w - MARGIN)
+      : clamp(p.x, MARGIN, window.innerWidth - w - MARGIN);
+    const y = p.corner
+      ? (p.corner.includes("t") ? MARGIN : window.innerHeight - h - MARGIN)
+      : clamp(p.y, MARGIN, window.innerHeight - h - MARGIN);
+    pill.style.left = x + "px";
+    pill.style.top = y + "px";
   }
-  $("grip").addEventListener("mousedown", (e) => {
+
+  function positionPanel() {
+    // Anchor to the pill's target position (style.left/top), not its rendered
+    // rect — during a corner snap the rect is mid-transition and the panel
+    // would stick to the drop point instead of the corner.
+    const left = parseFloat(pill.style.left) || 0, top = parseFloat(pill.style.top) || 0;
+    const pr = { left, top, width: pill.offsetWidth, right: left + pill.offsetWidth, bottom: top + pill.offsetHeight };
+    const below = pr.top < window.innerHeight / 2;
+    const space = below ? window.innerHeight - pr.bottom - 8 - MARGIN : pr.top - 8 - MARGIN;
+    panel.dataset.dir = below ? "down" : "up"; // entrance animates away from the pill
+    panel.style.maxHeight = Math.min(520, Math.max(160, space)) + "px";
+    panel.style.top = below ? pr.bottom + 8 + "px" : "";
+    panel.style.bottom = below ? "" : window.innerHeight - pr.top + 8 + "px";
+    const rightHalf = pr.left + pr.width / 2 > window.innerWidth / 2;
+    panel.style.left = rightHalf ? "" : Math.max(MARGIN, pr.left) + "px";
+    panel.style.right = rightHalf ? Math.max(MARGIN, window.innerWidth - pr.right) + "px" : "";
+  }
+
+  pill.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button, a")) return;
     e.preventDefault();
-    const rect = bar.getBoundingClientRect();
+    const rect = pill.getBoundingClientRect();
     const dx = e.clientX - rect.left, dy = e.clientY - rect.top;
-    const onDrag = (ev) => { bar.style.left = (ev.clientX - dx) + "px"; bar.style.top = (ev.clientY - dy) + "px"; };
-    const onUp = (ev) => {
-      window.removeEventListener("mousemove", onDrag, true);
-      window.removeEventListener("mouseup", onUp, true);
-      setState({ barPos: { x: ev.clientX - dx, y: ev.clientY - dy } });
+    let moved = false;
+    pill.setPointerCapture(e.pointerId);
+    pill.classList.add("dragging");
+    const onDrag = (ev) => {
+      moved = true;
+      pill.style.left = ev.clientX - dx + "px";
+      pill.style.top = ev.clientY - dy + "px";
+      if (state?.listOpen) positionPanel();
     };
-    window.addEventListener("mousemove", onDrag, true);
-    window.addEventListener("mouseup", onUp, true);
+    const onUp = (ev) => {
+      pill.removeEventListener("pointermove", onDrag);
+      pill.removeEventListener("pointerup", onUp);
+      pill.removeEventListener("pointercancel", onUp);
+      pill.classList.remove("dragging");
+      if (!moved) return;
+      const w = pill.offsetWidth, h = pill.offsetHeight;
+      const x = clamp(ev.clientX - dx, MARGIN, window.innerWidth - w - MARGIN);
+      const y = clamp(ev.clientY - dy, MARGIN, window.innerHeight - h - MARGIN);
+      const corners = {
+        tl: [MARGIN, MARGIN], tr: [window.innerWidth - w - MARGIN, MARGIN],
+        bl: [MARGIN, window.innerHeight - h - MARGIN], br: [window.innerWidth - w - MARGIN, window.innerHeight - h - MARGIN],
+      };
+      let pos = { x, y };
+      for (const [c, [cx, cy]] of Object.entries(corners)) {
+        if (Math.hypot(x - cx, y - cy) < SNAP) { pos = { corner: c }; break; }
+      }
+      pill.classList.add("snap");
+      panel.classList.add("snap");
+      setTimeout(() => { pill.classList.remove("snap"); panel.classList.remove("snap"); }, 300);
+      setState({ pos });
+    };
+    pill.addEventListener("pointermove", onDrag);
+    pill.addEventListener("pointerup", onUp);
+    pill.addEventListener("pointercancel", onUp);
   });
+
+  // Minimal focus trap for the two aria-modal surfaces (dialog, confirm).
+  function trapTab(container, e) {
+    const els = container.querySelectorAll("button, textarea, a[href]");
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    const active = root.activeElement;
+    if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    else if (!container.contains(active)) { e.preventDefault(); first.focus(); }
+  }
 
   // --- global shortcuts ---------------------------------------------------
   window.addEventListener("keydown", (e) => {
+    if (!state?.open) return;
+    if (!chrome.runtime?.id) return die(); // extension was reloaded under us
     if (e.key === "Escape") {
-      if (confirmEl.style.display === "flex") { confirmEl.style.display = "none"; return; }
-      if (popupOpen) return closePopup();
-      if (dialog.style.display === "flex") { dialog.style.display = "none"; return; }
+      if (confirmEl.style.display === "flex") return closeConfirm();
+      if (popupOpen) { closePopup(); return $("mark").focus(); }
+      if (dialog.style.display === "flex") return closeDialog();
+      if (editingId != null) { editingId = null; editDraft = null; render(); return $("notes").focus(); }
+      if (state.marking) return setState({ marking: false });
+      if (state.listOpen) { setState({ listOpen: false }); return $("notes").focus(); }
+      return;
     }
-    if (!open || popupOpen || isTyping() || e.metaKey || e.ctrlKey || e.altKey) return;
+    // While a modal is up: trap Tab inside it, suppress the global shortcuts.
+    const modal = confirmEl.style.display === "flex" ? confirmEl : dialog.style.display === "flex" ? dialog : null;
+    if (modal) { if (e.key === "Tab") trapTab(modal, e); return; }
+    // ⌥↑/⌥↓ retarget the composer's element — before the typing guard so they
+    // work while the note textarea has focus.
+    if (popupOpen && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      return retarget(e.key === "ArrowUp");
+    }
+    if (popupOpen || isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (state.marking && highlight.style.display === "block" && !cardHover) {
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const p = pickTarget()?.parentElement;
+        if (p && p !== document.body && p !== document.documentElement) { lockChain.push(p); paintHighlight(p); }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        lockChain.pop();
+        const t = pickTarget();
+        if (t) paintHighlight(t);
+        return;
+      }
+      if (e.key === "Enter") { e.preventDefault(); return openPopup(pickTarget()); }
+    }
     const k = e.key.toLowerCase();
-    if (k === "m") { e.preventDefault(); setState({ marking: !marking }); }
+    if (k === "m") { e.preventDefault(); setState({ marking: !state.marking }); }
     else if (k === "s") { e.preventDefault(); doSend(); }
+    else if (k === "l") { e.preventDefault(); setState({ listOpen: !state.listOpen }); }
   }, true);
 
   // --- wiring -------------------------------------------------------------
+  try { $("version").textContent = "v" + chrome.runtime.getManifest().version; } catch { $("version").textContent = "dev"; }
   window.addEventListener("mousemove", onMove, true);
   window.addEventListener("click", onClick, true);
-  window.addEventListener("scroll", hideHighlight, true);
-  window.addEventListener("resize", () => open && render());
+  let raf = 0;
+  window.addEventListener("scroll", () => {
+    if (!cardHover) hideHighlight();
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; updateDots(); });
+  }, true);
+  window.addEventListener("resize", () => state?.open && render());
 
-  chrome.storage.local.get(["open", "marking", "minimized", "barPos", "marks"], (r) => {
-    open = !!r.open; marking = !!r.marking; minimized = !!r.minimized;
-    barPos = r.barPos || null; marks = r.marks || [];
-    render();
-  });
-  chrome.storage.onChanged.addListener((c) => {
-    if (c.open) { open = !!c.open.newValue; if (!open) closePopup(); }
-    if (c.marking) { marking = !!c.marking.newValue; if (!marking) closePopup(); }
-    if (c.minimized) minimized = !!c.minimized.newValue;
-    if (c.barPos) barPos = c.barPos.newValue || null;
-    if (c.marks) { marks = c.marks.newValue || []; editingId = null; }
-    render();
-  });
+  try {
+    // background pings before opening, to check this script is alive here
+    chrome.runtime.onMessage.addListener((msg, _s, respond) => { if (msg === "ping") respond(true); });
+    chrome.runtime.sendMessage("tabId", (id) => {
+      if (chrome.runtime.lastError || id == null) return;
+      tabKey = "tab:" + id;
+      chrome.storage.session.get(tabKey).then((r) => { state = r[tabKey] || null; render(); });
+      chrome.storage.session.onChanged.addListener((c) => {
+        if (!c[tabKey]) return;
+        state = c[tabKey].newValue || null;
+        if (editingId != null && !marks().some((m) => m.id === editingId)) { editingId = null; editDraft = null; }
+        render();
+      });
+    });
+  } catch { die(); }
 })();

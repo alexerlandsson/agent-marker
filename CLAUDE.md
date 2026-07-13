@@ -59,7 +59,7 @@ across pages.
   shadows, and sizes are literals there — change both places together, and
   keep the keyboard-shortcut tables in `DESIGN.md` and `README.md` in sync
   with the `keydown` handlers in `content.js`.
-- Global shortcuts (`M`, `S`, `L`) are suppressed while typing — gate on
+- Global shortcuts (`M`, `G`, `L`, `N`) are suppressed while typing — gate on
   `isTyping()`. `Escape` closes strictly top-down: confirm → composer → prompt
   dialog → card editor → marking mode → panel.
 - `cssPath` prefers `id` / `data-testid`-style hooks and **filters
@@ -71,4 +71,8 @@ across pages.
   root) via `file://` — it stubs `chrome.runtime`/`chrome.storage.session`,
   loads `./content.js`, and exposes `toggleExt()` / `extState()` on `window`
   for driving state from the console. It is dev-only and not part of the
-  shipped extension.
+  shipped extension. Gotcha when driving it from an unfocused/background
+  webview (e.g. cmux browser): CSS entrance animations freeze at their first
+  frame (`opacity:0`), so animated surfaces look missing in screenshots even
+  though `style.display` is correct — set `style.animation='none'` on the
+  surface before screenshotting, or check `checkVisibility()` instead.

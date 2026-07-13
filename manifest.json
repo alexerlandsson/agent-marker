@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Agent Marker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Mark elements on a page, write what should change, and send the batch to an AI coding agent.",
   "minimum_chrome_version": "110",
   "permissions": ["storage"],

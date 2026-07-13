@@ -20,6 +20,8 @@
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
     "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+    "sticky-note": '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2Z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/>',
+    "corner-down-left": '<path d="M20 4v7a4 4 0 0 1-4 4H4"/><path d="m9 10-5 5 5 5"/>',
   };
   const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 
@@ -38,6 +40,7 @@
   let editingId = null;   // mark id being edited in the list
   let editDraft = null;   // in-progress edit text — survives re-renders (resize, storage echo)
   let popupOpen = false;  // note composer visible
+  let popupPage = false;  // composer is a page-level note (no target element)
   let popupEl = null;     // element the composer is for
   let popupChain = [];    // children walked up from via ⌥↑, for ⌥↓
   let hoverEl = null;     // element under the cursor while marking
@@ -168,8 +171,10 @@
         color:var(--muted); font-size:13px; }
 
       /* kbd hints */
-      kbd { font-family:var(--mono); font-size:10px; font-weight:600; line-height:1; padding:3px 5px; border-radius:4px;
+      kbd { display:inline-flex; align-items:center; gap:2px; font-family:var(--mono); font-size:10px; font-weight:600;
+        line-height:1; padding:3px 5px; border-radius:4px;
         background:rgba(95,227,200,.14); border:1px solid rgba(95,227,200,.32); color:inherit; }
+      kbd svg { display:block; }
       .onaccent kbd { background:rgba(6,43,36,.14); border-color:rgba(6,43,36,.22); }
       .onneutral kbd { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.1); }
 
@@ -256,11 +261,12 @@
           <div class="title">Agent Marker</div>
           <div class="count" id="count"></div>
         </div>
-        <button class="iconbtn" id="panelclose" title="Close (Esc)" aria-label="Close marks">${icon("x", 15)}</button>
+        <button class="iconbtn" id="pagenote" title="Add page note (N)" aria-label="Add page note">${icon("sticky-note", 15)}</button>
+        <button class="iconbtn" id="panelclose" style="margin-left:0;" title="Close (Esc)" aria-label="Close marks">${icon("x", 15)}</button>
       </div>
       <div class="list" id="list"></div>
       <div class="footer">
-        <button class="primary onaccent" id="send">${icon("terminal", 15)} Generate prompt <kbd aria-hidden="true">S</kbd></button>
+        <button class="primary onaccent" id="send">${icon("terminal", 15)} Generate prompt <kbd aria-hidden="true">G</kbd></button>
         <button class="ghost" id="clear">Clear</button>
       </div>
       <div class="credit"><span id="version"></span> · <a href="https://github.com/alexerlandsson/agent-marker" target="_blank" rel="noopener noreferrer">GitHub ${icon("external-link", 9)}</a></div>
@@ -276,7 +282,7 @@
       </div>
       <textarea id="msg" rows="3" placeholder="What should change here?"></textarea>
       <div class="btnrow">
-        <button class="btn-save onaccent" id="ok">Save <kbd aria-hidden="true">⌘↵</kbd></button>
+        <button class="btn-save onaccent" id="ok">Save <kbd aria-hidden="true">⌘${icon("corner-down-left", 9)}</kbd></button>
         <button class="btn-cancel onneutral" id="cancel">Cancel <kbd aria-hidden="true">Esc</kbd></button>
       </div>
     </div>
@@ -369,6 +375,21 @@
   }
 
   const tagOf = (el) => el.nodeName.toLowerCase();
+  // The element's opening tag verbatim — attributes are what the agent greps for.
+  const openTag = (el) => {
+    const h = el.outerHTML, i = h.indexOf(">");
+    const t = i > 0 ? h.slice(0, i + 1) : "";
+    return t.length > 200 ? t.slice(0, 199) + "…" : t;
+  };
+  // Nearest labelled landmark/section, e.g. `<section> "Pricing"`.
+  const sectionOf = (el) => {
+    const sec = el.parentElement?.closest("section,article,main,nav,header,footer,aside,form");
+    if (!sec) return "";
+    const label = sec.getAttribute("aria-label") ||
+      sec.querySelector("h1,h2,h3,h4,h5,h6")?.textContent.trim().slice(0, 60) || "";
+    return `<${tagOf(sec)}>${label ? ` "${label}"` : ""}`;
+  };
+  const viewportNow = () => `${window.innerWidth}×${window.innerHeight}`;
   const refOf = (el) => (el.id ? `#${el.id}` : el.classList.length ? `.${el.classList[0]}` : "");
   const descOf = (el) => {
     const cls = [...el.classList].slice(0, 3).join(".");
@@ -376,7 +397,7 @@
   };
   const shortUrl = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return u; } };
   const findMarkEl = (m) => {
-    if (m.url !== location.href) return null;
+    if (!m.selector || m.url !== location.href) return null;
     try { return document.querySelector(m.selector); } catch { return null; }
   };
 
@@ -454,26 +475,47 @@
     Object.assign(popup.style, { display: "block", top: Math.max(8, top) + "px", left: Math.max(8, left) + "px" });
     $("msg").focus();
   }
+  // Page-level note — same composer, no target element, anchored to the pill.
+  function openPagePopup() {
+    popupOpen = true;
+    popupPage = true;
+    popupEl = null;
+    popupChain = [];
+    syncPrimary();
+    hideHighlight();
+    root.querySelector(".walk").style.display = "none";
+    $("popupTag").textContent = "this page";
+    $("msg").value = "";
+    const r = pill.getBoundingClientRect();
+    const top = Math.min(r.bottom + 8, window.innerHeight - 150);
+    const left = Math.min(r.left, window.innerWidth - 296);
+    Object.assign(popup.style, { display: "block", top: Math.max(8, top) + "px", left: Math.max(8, left) + "px" });
+    $("msg").focus();
+  }
   function closePopup() {
     popupOpen = false;
+    popupPage = false;
     popup.style.display = "none";
     popupEl = null;
     popupChain = [];
+    root.querySelector(".walk").style.display = "";
     syncPrimary();
     if (!cardHover) hideHighlight();
   }
 
   $("ok").onclick = () => {
     const message = $("msg").value.trim();
-    if (!message || !popupEl) return closePopup();
+    if (!message || (!popupEl && !popupPage)) return closePopup();
     const ms = marks().slice();
-    ms.push({
+    const base = {
       id: String(ms.length ? Math.max(...ms.map((m) => +m.id)) + 1 : 1),
-      url: location.href, title: document.title,
-      selector: cssPath(popupEl), tag: tagOf(popupEl), ref: refOf(popupEl),
-      element: descOf(popupEl), text: (popupEl.textContent || "").trim().slice(0, 80),
-      message,
-    });
+      url: location.href, title: document.title, viewport: viewportNow(), message,
+    };
+    ms.push(popupPage
+      ? { ...base, selector: "", tag: "page", ref: "", element: "page", text: "" }
+      : { ...base, selector: cssPath(popupEl), tag: tagOf(popupEl), ref: refOf(popupEl),
+          element: descOf(popupEl), text: (popupEl.textContent || "").trim().slice(0, 80),
+          html: openTag(popupEl), context: sectionOf(popupEl) });
     closePopup();
     setState({ marks: ms });
   };
@@ -599,7 +641,7 @@
         li.appendChild(head);
         const msg = document.createElement("div"); msg.className = "msg"; msg.textContent = m.message;
         li.appendChild(msg);
-        if (here && !el) { const s = document.createElement("div"); s.className = "stale"; s.textContent = "Element no longer found on this page"; li.appendChild(s); }
+        if (here && m.selector && !el) { const s = document.createElement("div"); s.className = "stale"; s.textContent = "Element no longer found on this page"; li.appendChild(s); }
       }
       list.appendChild(li);
     });
@@ -640,11 +682,21 @@
   function buildPrompt(ms) {
     const byUrl = {};
     ms.forEach((m) => (byUrl[m.url] ||= []).push(m));
-    let out = `I marked ${ms.length} element(s) on a running web app that need changes. For each item, use the CSS selector, element description and text snippet to find the matching code (the page URL tells you the route), then make the change. Generated class names may not exist in source — fall back to the element's text and structure. Only change what each item asks for.\n`;
+    const vp0 = ms.find((m) => m.viewport)?.viewport;
+    let out = `I marked ${ms.length} item(s) on a running web app that need changes. For each item, use the CSS selector, HTML opening tag, element description and text snippet to find the matching code (the page URL tells you the route), then make the change. Generated class names may not exist in source — fall back to the element's text and structure. Only change what each item asks for.`;
+    if (vp0) out += ` Viewport was ${vp0} unless an item says otherwise.`;
+    if (ms.some((m) => !m.selector)) out += ` "Page note" items apply to the whole page, not one element.`;
+    out += "\n";
     for (const [url, items] of Object.entries(byUrl)) {
       out += `\n## ${items[0].title || url}\n${url}\n`;
       items.forEach((m) => {
-        out += `\n${ms.indexOf(m) + 1}. Selector: \`${m.selector}\`\n   Element: ${m.element}${m.text ? ` — "${m.text}"` : ""}\n   Change: ${m.message}\n`;
+        const n = ms.indexOf(m) + 1;
+        if (!m.selector) { out += `\n${n}. Page note: ${m.message}\n`; return; }
+        out += `\n${n}. Selector: \`${m.selector}\`\n   Element: ${m.element}${m.text ? ` — "${m.text}"` : ""}\n`;
+        if (m.html) out += `   HTML: \`${m.html}\`\n`;
+        if (m.context) out += `   Context: inside ${m.context}\n`;
+        if (m.viewport && m.viewport !== vp0) out += `   Viewport: ${m.viewport}\n`;
+        out += `   Change: ${m.message}\n`;
       });
     }
     return out;
@@ -656,6 +708,7 @@
     lastFocus = root.activeElement || document.activeElement;
     dialog.style.display = "flex";
     $("copy").focus();
+    copyPrompt(); // prompt lands in the clipboard immediately; dialog is for review
   }
   function closeDialog() {
     dialog.style.display = "none";
@@ -679,10 +732,11 @@
     for (const ev of ["pointerleave", "blur", "click"]) btn.addEventListener(ev, hide);
   }
   bindTip($("notes"), "Marks", "L");
-  bindTip($("pillsend"), "Generate prompt", "S");
+  bindTip($("pillsend"), "Generate prompt", "G");
 
   $("mark").onclick = () => setState({ marking: !state.marking });
   $("notes").onclick = () => setState({ listOpen: !state.listOpen });
+  $("pagenote").onclick = openPagePopup;
   $("panelclose").onclick = () => { setState({ listOpen: false }); $("notes").focus(); };
   $("send").onclick = doSend;
   $("pillsend").onclick = doSend;
@@ -701,13 +755,14 @@
   confirmEl.onclick = (e) => { if (e.target === confirmEl) closeConfirm(); };
   $("confirmClear").onclick = () => { closeConfirm(); setState({ marks: [] }); };
   $("dialogClose").onclick = closeDialog;
-  $("copy").onclick = async () => {
+  async function copyPrompt() {
     const ta = $("prompt");
     try { await navigator.clipboard.writeText(ta.value); }
     catch { ta.focus(); ta.select(); document.execCommand("copy"); $("copy").focus(); }
     $("copy").innerHTML = `${icon("check", 15)} Copied`;
     setTimeout(() => { $("copy").innerHTML = `${icon("copy", 15)} Copy prompt`; }, 1200);
-  };
+  }
+  $("copy").onclick = copyPrompt;
 
   // --- pill position, drag & corner snap -----------------------------------
   function positionPill() {
@@ -833,8 +888,9 @@
     }
     const k = e.key.toLowerCase();
     if (k === "m") { e.preventDefault(); setState({ marking: !state.marking }); }
-    else if (k === "s") { e.preventDefault(); doSend(); }
+    else if (k === "g") { e.preventDefault(); doSend(); }
     else if (k === "l") { e.preventDefault(); setState({ listOpen: !state.listOpen }); }
+    else if (k === "n") { e.preventDefault(); openPagePopup(); }
   }, true);
 
   // --- wiring -------------------------------------------------------------
@@ -847,6 +903,13 @@
     if (!raf) raf = requestAnimationFrame(() => { raf = 0; updateDots(); });
   }, true);
   window.addEventListener("resize", () => state?.open && render());
+  // SPA support: client-side navigations change the URL without a reload, and
+  // framework re-renders move/replace marked elements — repaint on both.
+  self.navigation?.addEventListener("navigatesuccess", () => state?.open && render());
+  new MutationObserver(() => {
+    if (!state?.open || !marks().length) return;
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; updateDots(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   try {
     // background pings before opening, to check this script is alive here

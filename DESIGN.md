@@ -134,11 +134,12 @@ duration:
 |-------|-----------------------------------------------|
 | `M`   | Toggle Mark mode                              |
 | `L`   | Toggle the marks panel                        |
-| `S`   | Generate prompt                               |
+| `G`   | Generate prompt (auto-copies to clipboard)    |
+| `N`   | Add a page note (no target element)           |
 | `↑ ↓` | While marking: walk to parent / back to child |
 | `↵`   | While marking: mark the highlighted element   |
 | `⌥↑ ⌥↓` | In composer: retarget note to parent / back to child (also chevron buttons) |
 | `⌘↵`  | Save note (in composer / card editor)         |
 | `Esc` | Close topmost thing: confirm → composer → dialog → card editor → Mark mode → panel |
 
-Global shortcuts (M, S, L) are ignored while typing in a field.
+Global shortcuts (M, G, L, N) are ignored while typing in a field.

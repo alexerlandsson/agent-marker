@@ -41,8 +41,12 @@ every mark. Mark across multiple pages in one go; send once.
 4. **Review** — click the count on the pill (or press <kbd>L</kbd>) to open the
    marks panel. Hover a card to highlight its element, click its number to
    scroll to it, edit or delete inline.
-5. **Generate** — press <kbd>S</kbd> (or the terminal button), **Copy prompt**,
-   and paste it into Claude Code.
+5. **Generate** — press <kbd>G</kbd> (or the terminal button). The prompt is
+   copied to your clipboard immediately and shown for review — just paste it
+   into Claude Code.
+
+Feedback that isn't about one element ("overall spacing feels cramped")? Press
+<kbd>N</kbd> (or the sticky-note button in the panel) to add a **page note**.
 
 Marks are **per tab** and last until the tab (or browser) closes — the toolbar
 icon just hides the tool without losing anything, and its badge shows each
@@ -54,7 +58,8 @@ tab's mark count.
 | -------------- | --------------------------------------------- |
 | <kbd>M</kbd>   | Toggle marking                                 |
 | <kbd>L</kbd>   | Toggle the marks panel                         |
-| <kbd>S</kbd>   | Generate prompt                                |
+| <kbd>G</kbd>   | Generate prompt (auto-copies to clipboard)     |
+| <kbd>N</kbd>   | Add a page note                                |
 | <kbd>↑</kbd> <kbd>↓</kbd> | While marking: walk to parent / back to child |
 | <kbd>↵</kbd>   | While marking: mark the highlighted element    |
 | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>⌥</kbd> <kbd>↓</kbd> | In the note composer: retarget to parent / back |
@@ -64,6 +69,8 @@ tab's mark count.
 ## What the agent receives
 
 Each mark contributes its page title and URL, a CSS selector, the element
-(tag / id / classes + a text snippet), and your instruction — grouped by page.
-That's enough for Claude Code to locate the code and make the change without any
-extra context from you.
+(tag / id / classes + a text snippet), its verbatim HTML opening tag, the
+nearest labelled section it sits in, the viewport size, and your instruction —
+grouped by page. Page notes are listed alongside, flagged as applying to the
+whole page. That's enough for Claude Code to locate the code and make the
+change without any extra context from you.

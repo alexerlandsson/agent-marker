@@ -33,11 +33,20 @@ everything else flows through `storage.session.onChanged`.
   to isolate styles from the host page. All design tokens are CSS custom
   properties on `:host`. The main view is a **floating pill** that drags
   anywhere and **snaps to viewport corners** (`pos` is `{corner}` or `{x,y}`);
-  the marks panel is a popover anchored to it. Key flow: `onMove`/`onClick`
-  (marking, with ArrowUp/Down parent-walk) → `openPopup` (note composer) →
-  `cssPath` builds the selector → `setState({marks})` → `render`/`renderList`/
-  `updateDots` → `buildPrompt`/`doSend`. Numbered dots pin to marked elements
-  on the current page and match the list/prompt numbering.
+  the marks panel and the a11y audit panel are popovers anchored to it (one
+  open at a time — `listOpen` is persisted, `auditOpen` is a local). Key flow:
+  `onMove`/`onClick` (marking, with ArrowUp/Down parent-walk) → `openPopup`
+  (note composer) → `cssPath` builds the selector → `setState({marks})` →
+  `render`/`renderList`/`updateDots` → `buildPrompt`/`doSend`. **Numbering
+  comes from `orderedMarks()`** (marks grouped by page, pages in first-marked
+  order) — list, dots and prompt must all use it so numbers agree.
+- **A11y audit** — `runAudit()` in `content.js` is a hand-rolled,
+  machine-checkable subset of WCAG 2.1 (alt/labels/names/lang/contrast/…), by
+  design zero-dependency; vendor axe-core only if real coverage is ever
+  needed. It re-runs on open/navigation/panel-toggle; `issueMark()` converts
+  issues to marks (tagged `a11y: "<sc> <level>"`, deduped against existing
+  marks by message so re-runs can't double-add). The AA/AAA level is the one
+  piece of **browser-wide** state, in `chrome.storage.local` (`a11yLevel`).
 - **`manifest.json`** — permissions: `storage` only; `host_permissions:
   <all_urls>`; `minimum_chrome_version: 110` (session-storage access level +
   badge text color).
@@ -59,9 +68,9 @@ across pages.
   shadows, and sizes are literals there — change both places together, and
   keep the keyboard-shortcut tables in `DESIGN.md` and `README.md` in sync
   with the `keydown` handlers in `content.js`.
-- Global shortcuts (`M`, `G`, `L`, `N`) are suppressed while typing — gate on
-  `isTyping()`. `Escape` closes strictly top-down: confirm → composer → prompt
-  dialog → card editor → marking mode → panel.
+- Global shortcuts (`M`, `G`, `L`, `N`, `A`) are suppressed while typing — gate
+  on `isTyping()`. `Escape` closes strictly top-down: confirm → composer →
+  prompt dialog → card editor → marking mode → audit panel → marks panel.
 - `cssPath` prefers `id` / `data-testid`-style hooks and **filters
   hashed/generated class names** (`stableClass`) so selectors stay findable in
   source code.

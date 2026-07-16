@@ -41,12 +41,25 @@ every mark. Mark across multiple pages in one go; send once.
 4. **Review** — click the count on the pill (or press <kbd>L</kbd>) to open the
    marks panel. Hover a card to highlight its element, click its number to
    scroll to it, edit or delete inline.
-5. **Generate** — press <kbd>G</kbd> (or the terminal button). The prompt is
-   copied to your clipboard immediately and shown for review — just paste it
-   into Claude Code.
+5. **Generate** — press <kbd>G</kbd> (or **Generate prompt** in the marks
+   panel). The prompt is copied to your clipboard immediately and shown for
+   review — just paste it into Claude Code.
 
 Feedback that isn't about one element ("overall spacing feels cramped")? Press
-<kbd>N</kbd> (or the sticky-note button in the panel) to add a **page note**.
+<kbd>N</kbd> (or the sticky-note button on the pill) to add a **page note**.
+
+### A11y audit
+
+The pill shows the page's accessibility status: a teal check when the built-in
+audit finds nothing, or a yellow triangle with the issue count. Click it (or
+press <kbd>A</kbd>) to open the report — machine-checkable WCAG 2.1 checks
+(missing alt text, unlabeled fields, nameless buttons, text contrast, heading
+order, `lang`, zoom-blocking viewport, …) at level **AA** or **AAA** (toggle in
+the report header; remembered across sessions). Add issues to your notes one
+at a time (the **+** toggles to **✓**; click again to remove) or all at once —
+they join the generated prompt tagged with their WCAG criterion so the agent
+knows exactly what to fix. Automated checks cover
+only part of WCAG; treat a green check as "nothing obvious", not "compliant".
 
 Marks are **per tab** and last until the tab (or browser) closes — the toolbar
 icon just hides the tool without losing anything, and its badge shows each
@@ -60,6 +73,7 @@ tab's mark count.
 | <kbd>L</kbd>   | Toggle the marks panel                         |
 | <kbd>G</kbd>   | Generate prompt (auto-copies to clipboard)     |
 | <kbd>N</kbd>   | Add a page note                                |
+| <kbd>A</kbd>   | Toggle the a11y audit panel                    |
 | <kbd>↑</kbd> <kbd>↓</kbd> | While marking: walk to parent / back to child |
 | <kbd>↵</kbd>   | While marking: mark the highlighted element    |
 | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>⌥</kbd> <kbd>↓</kbd> | In the note composer: retarget to parent / back |
@@ -72,5 +86,6 @@ Each mark contributes its page title and URL, a CSS selector, the element
 (tag / id / classes + a text snippet), its verbatim HTML opening tag, the
 nearest labelled section it sits in, the viewport size, and your instruction —
 grouped by page. Page notes are listed alongside, flagged as applying to the
-whole page. That's enough for Claude Code to locate the code and make the
-change without any extra context from you.
+whole page, and marks added from the a11y audit carry their WCAG criterion.
+That's enough for Claude Code to locate the code and make the change without
+any extra context from you.

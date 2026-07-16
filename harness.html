@@ -23,6 +23,7 @@
   // chrome.* stub — mimics session storage + onChanged + the tabId handshake.
   const listeners = [];
   const store = {};
+  const localStore = {};
   window.chrome = {
     runtime: {
       id: "harness",
@@ -46,6 +47,10 @@
         },
         remove: (k) => { delete store[k]; return Promise.resolve(); },
         onChanged: { addListener: (f) => listeners.push(f) },
+      },
+      local: {
+        get: (k) => Promise.resolve(localStore[k] === undefined ? {} : { [k]: localStore[k] }),
+        set: (obj) => { Object.assign(localStore, obj); return Promise.resolve(); },
       },
     },
   };
@@ -75,6 +80,15 @@
     <article class="card"><h3>Card one</h3><p>First card body text.</p></article>
     <article class="card"><h3>Card two</h3><p>Second card body text.</p></article>
     <article class="card css-1q2w3e sc-bxivhb pretty"><h3>Card three</h3><p>Hashed-class card.</p></article>
+  </section>
+  <!-- deliberate a11y issues for testing the audit panel -->
+  <section aria-label="A11y bait">
+    <h5>Skipped heading level</h5>
+    <img src="logo.svg" width="24" height="24">
+    <button><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11" stroke="#333"/></svg></button>
+    <input type="text" placeholder="No label here">
+    <p style="color:#aaa;">Low-contrast gray text on white.</p>
+    <p style="color:#767676;">Borderline text: passes AA, fails AAA.</p>
   </section>
 </main>
 <footer><p class="fineprint">Footer fine print — scroll target.</p></footer>

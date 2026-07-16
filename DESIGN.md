@@ -24,6 +24,10 @@ color:
   accentInk:     "#062b24"   # text/icon on top of accent
   tagBg:         "#0f2a25"   # element tag chip background
   tagBorder:     "#1c4c43"   # element tag chip border
+  # warn (yellow) — a11y-audit identity only, never a call to action
+  warn:          "#f5c84c"   # a11y issue count, WCAG chips
+  warnBg:        "#2b230f"   # a11y chip background
+  warnBorder:    "#52441d"   # a11y chip border
 
 font:
   ui:   "'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif"
@@ -59,13 +63,24 @@ both places when changing them.
 ## Component notes
 
 - **Pill** — the main view: a draggable floating bar (grip · logo · Mark ·
-  marks-count · generate-prompt). Drag anywhere that isn't a button; releasing within
-  `snapRadius` of a viewport corner sticks it to that corner (survives window
-  resizes). Snap animates `left/top` (0.22s), disabled under
-  `prefers-reduced-motion`.
+  page-note · a11y-status · marks-count). The marks count sits last as the
+  flow's destination; Generate prompt lives only in the panel footer (and `G`).
+  Drag anywhere that isn't a button; releasing within `snapRadius` of a
+  viewport corner sticks it to that corner (survives window resizes). Snap
+  animates `left/top` (0.22s), disabled under `prefers-reduced-motion`.
 - **Marks panel** — popover anchored to the pill (opens toward the free half of
   the viewport), toggled by the count button or `L`. Closes on `Esc` or
-  clicking the page while not marking.
+  clicking the page while not marking. Marks are grouped by page (mono page
+  header per group when more than one page); each card has an ⓘ toggle
+  revealing URL / viewport / WCAG criterion.
+- **A11y status + audit panel** — the pill shows a teal check (no issues) or a
+  yellow `warn` triangle with the issue count. Clicking it (or `A`) opens the
+  audit popover: issue cards with `WCAG <sc> · <level>` chips, an AA/AAA
+  segmented toggle (persisted browser-wide), a per-issue **+ / ✓ toggle**
+  (adds the issue to the notes; added state removes it again — derived live
+  from the marks) and footer **Add all to notes**. Marks created from the
+  audit carry a small `a11y` warn chip. Only one popover (marks / audit) is
+  open at a time.
 - **Mark dots** — 18px accent circles pinned to each marked element on the
   current page, numbered to match the panel list and the generated prompt.
   Clicking one opens its card.
@@ -136,10 +151,11 @@ duration:
 | `L`   | Toggle the marks panel                        |
 | `G`   | Generate prompt (auto-copies to clipboard)    |
 | `N`   | Add a page note (no target element)           |
+| `A`   | Toggle the a11y audit panel                   |
 | `↑ ↓` | While marking: walk to parent / back to child |
 | `↵`   | While marking: mark the highlighted element   |
 | `⌥↑ ⌥↓` | In composer: retarget note to parent / back to child (also chevron buttons) |
 | `⌘↵`  | Save note (in composer / card editor)         |
 | `Esc` | Close topmost thing: confirm → composer → dialog → card editor → Mark mode → panel |
 
-Global shortcuts (M, G, L, N) are ignored while typing in a field.
+Global shortcuts (M, G, L, N, A) are ignored while typing in a field.
